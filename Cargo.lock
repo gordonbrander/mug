@@ -539,6 +539,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "globset",
  "insta",
  "pulldown-cmark",
  "serde",

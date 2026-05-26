@@ -1,5 +1,8 @@
 use crate::config::Config;
+use crate::doc::Doc;
+use crate::query;
 use anyhow::{Context, Result};
+use std::sync::Arc;
 use tera::Tera;
 
 /// Tera environment used by the markup phase. Intentionally restricted: no
@@ -10,11 +13,13 @@ pub fn build_markup_env(config: &Config) -> Result<Tera> {
 }
 
 /// Tera environment used by the template phase. The full filter set lands here
-/// in later phases (`query` in Phase 7, `permalink` in Phase 9, `backlinks` in
-/// Phase 10). In Phase 3 the two envs are functionally identical; the split
-/// exists so later filter registration only touches this builder.
-pub fn build_template_env(config: &Config) -> Result<Tera> {
-    load_templates(config)
+/// over phases 7, 9, 10. `docs` is a frozen snapshot of the index taken at the
+/// start of the template phase — closures registered here borrow from it for
+/// the rest of the build.
+pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> {
+    let mut env = load_templates(config)?;
+    query::register(&mut env, docs);
+    Ok(env)
 }
 
 fn load_templates(config: &Config) -> Result<Tera> {
@@ -58,6 +63,16 @@ mod tests {
     fn missing_templates_dir_is_not_an_error() {
         // Fixtures 01 and 02 have no templates/ dir; the env must still build.
         assert!(build_markup_env(&cfg_without_templates()).is_ok());
-        assert!(build_template_env(&cfg_without_templates()).is_ok());
+        assert!(build_template_env(&cfg_without_templates(), Arc::new(Vec::new())).is_ok());
+    }
+
+    #[test]
+    fn template_env_registers_query() {
+        let env =
+            build_template_env(&cfg_without_templates(), Arc::new(Vec::new())).unwrap();
+        // Asserts the function exists; an empty doc snapshot returns an empty list.
+        let mut env = env;
+        let out = env.render_str("{{ query() | length }}", &tera::Context::new()).unwrap();
+        assert_eq!(out, "0");
     }
 }

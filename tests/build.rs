@@ -140,3 +140,8 @@ fn cascade() {
 fn permalinks() {
     run_build("06_permalinks");
 }
+
+#[test]
+fn query() {
+    run_build("07_query");
+}

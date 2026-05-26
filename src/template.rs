@@ -4,6 +4,7 @@ use crate::site_data::SiteData;
 use crate::tera_env::build_template_env;
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 struct Page<'a> {
@@ -11,7 +12,11 @@ struct Page<'a> {
 }
 
 pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
-    let env = build_template_env(config)?;
+    // Snapshot the index for the `query` function. By spec §11, the index is
+    // fully populated before this phase runs, so a frozen view is exactly what
+    // every template sees.
+    let snapshot = Arc::new(index.docs.clone());
+    let env = build_template_env(config, snapshot)?;
 
     for doc in &mut index.docs {
         let Some(template_name) = doc.template.clone() else {

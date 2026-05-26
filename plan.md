@@ -101,14 +101,16 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [x] Add unit tests for `permalink::expand` (date components, trailing slash, default fallback, leading-slash strip, verbatim no-trailing-slash).
   - [x] Verify: `cargo test` passes (52 unit tests + 6 integration fixtures).
 
-- [ ] Phase 7: `query` filter — add a `Query` type and evaluator that iterates over `Index.docs` linearly; register the filter on the template env only. No secondary indexes — simplest thing that could work; revisit if iteration cost actually shows up.
-  - [ ] Add `globset` to `Cargo.toml`.
-  - [ ] Add `src/query.rs::Query { path: Option<Glob>, tag: Option<String>, order_by: OrderKey, sort: SortDir }` plus a parser for the compact form `path:<glob>, tag:<t> order_by:<f> sort:<d>` and a struct form callable from Tera kwargs.
-  - [ ] Add `src/query.rs::evaluate(query: &Query, index: &Index) -> Vec<&Doc>` — linear scan over `index.docs`, filter, sort.
-  - [ ] Register `query` as a Tera function on the template env only; the markup env stays restricted.
-  - [ ] Add `tests/fixtures/07_query/` with three posts and an `index.html` template listing them via `{{ query(...) }}`.
-  - [ ] Verify: `cargo test` passes and verifies ordering by `date desc`.
-  - [ ] Verify: negative test asserts calling `query` from a Markdown body errors during markup.
+- [x] Phase 7: `query` filter — add a `Query` type and evaluator that iterates over `Index.docs` linearly; register the filter on the template env only. No secondary indexes — simplest thing that could work; revisit if iteration cost actually shows up.
+  - [x] Add `globset` to `Cargo.toml`.
+  - [x] Add `src/query.rs::Query { path: Option<Glob>, tag: Option<String>, order_by: OrderKey, sort: SortDir, limit: Option<usize> }`. **Deviations**: (1) added a `limit` field (extends spec §9 with a small predictable result cap); (2) the Tera surface is **kwargs only** — `Query::from_kwargs(&HashMap<String, tera::Value>) -> tera::Result<Self>`. No compact-string parser yet; that grammar is deferred to Phase 8, where serde can deserialize the same fields from a YAML `query:` map in generator frontmatter for free.
+  - [x] Add `src/query.rs::evaluate(query: &Query, docs: &[Doc]) -> Vec<&Doc>` — linear scan, filter, sort, then `truncate(limit)`. **Deviation**: signature takes `&[Doc]` instead of `&Index` because the function operates on a frozen `Arc<Vec<Doc>>` snapshot, not the live index (see template-phase wiring below).
+  - [x] Register `query` as a Tera function on the template env only; the markup env stays restricted.
+  - [x] Snapshot wiring: `template::run` clones `index.docs` into an `Arc<Vec<Doc>>` at the start of the phase and passes it to `build_template_env(config, snapshot)`. `Doc` gained `#[derive(Clone)]` to make this possible. The snapshot is what every template's `query()` call sees.
+  - [x] Add `tests/fixtures/07_query/` with three posts (`posts/{a,b,c}.md` at three distinct dates) and a `home.html` template using `{% for p in query(path="posts/*.md") %}` with no `order_by`/`sort`, so the C→B→A order in the expected output proves the default is `created desc`.
+  - [x] Verify: `cargo test` passes (64 unit tests + 7 integration fixtures).
+  - [x] Verify: existing `tera_env::tests::markup_env_does_not_register_query` (and `…backlinks`) still pass — these guard the spec §11 "no index-backed filters in markup" invariant. Plus a new `template_env_registers_query` positive test.
+  - [x] Verify: manual `cargo run -- build` in `tests/fixtures/07_query/` produces `dist/index.html` listing the posts in date-desc order.
 
 - [ ] Phase 8: Generators + pagination — fill in the `src/generate.rs` stub left in Phase 1. Introduce `Generator` and `Pagination` types; emit `Doc` descriptors that join the existing `Index`.
   - [ ] Add `src/generator.rs::Generator { id_path, query, per_page: Option<usize>, permalink: String, template: Option<String>, order: i32, body: String }`.

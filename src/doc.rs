@@ -7,7 +7,7 @@ use serde_yaml_ng::{Mapping, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Doc {
     pub id_path: PathBuf,
     pub output_path: PathBuf,

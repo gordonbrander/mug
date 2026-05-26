@@ -5,6 +5,7 @@ pub mod generate;
 pub mod index;
 pub mod markup;
 pub mod permalink;
+pub mod query;
 pub mod read;
 pub mod site_data;
 pub mod static_copy;
