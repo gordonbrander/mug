@@ -130,3 +130,8 @@ fn templates() {
 fn input_types() {
     run_build("04_input_types");
 }
+
+#[test]
+fn cascade() {
+    run_build("05_cascade");
+}

@@ -1,16 +1,19 @@
 use crate::config::Config;
 use crate::doc::DocKind;
 use crate::index::Index;
+use crate::site_data::SiteData;
 use crate::tera_env::build_markup_env;
 use anyhow::{Context, Result};
 use pulldown_cmark::{Parser, html};
 
-pub fn run(config: &Config, index: &mut Index) -> Result<()> {
+pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
     let mut markup_env = build_markup_env(config)?;
 
     for doc in &mut index.docs {
         let mut ctx = tera::Context::new();
         ctx.insert("doc", &*doc);
+        ctx.insert("site", &site_data.site);
+        ctx.insert("data", &site_data.data);
 
         // Tera over the body string runs unescaped (the one-off template has
         // no file extension, so HTML autoescape is off). Authors writing

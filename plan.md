@@ -83,14 +83,14 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [x] Verify: `cargo test` passes (36 unit tests + 4 integration fixtures, including `input_types`).
   - [x] Verify: manual `cargo run -- build` in `tests/fixtures/04_input_types/` produces three `.html` files matching `expected/` byte-for-byte.
 
-- [ ] Phase 5: Static dir + `config.yaml` + `data/` cascade — extend `Config` with loaded `site` data, introduce a `SiteData` carrier for `config` + `data/`, and pass it to the template context.
-  - [ ] Add `src/config.rs::Config::load(path)` — parse `config.yaml` into `Config` (merged over defaults); zero-config still works if file is absent.
-  - [ ] Add `src/site_data.rs::SiteData { config: serde_yaml_ng::Mapping, data: serde_yaml_ng::Mapping }`; `load(&Config) -> SiteData` reads `data/**/*.yaml` into a nested map keyed by relative path components (e.g. `data/site/nav.yaml` → `data.site.nav`).
-  - [ ] Thread `SiteData` through the pipeline (signature change on `template::run` and `markup::run`); inject `site` and `data` into the Tera context.
-  - [ ] Add `src/static_copy.rs::run(&Config)` — recursive copy from `static/` to `dist/`; call after `write`.
-  - [ ] Add `tests/fixtures/05_cascade/` with `static/robots.txt`, `config.yaml` declaring `site.title`, `data/menu.yaml`, a template referencing all three.
-  - [ ] Verify: `cargo test` passes.
-  - [ ] Verify: manual build copies `static/` and renders config + data values into the templated output.
+- [x] Phase 5: Static dir + `config.yaml` + `data/` cascade — extend `Config` with loaded `site` data, introduce a `SiteData` carrier for `site` + `data/`, and pass it to the template context.
+  - [x] Add `src/config.rs::Config::load(path) -> Result<(Config, Mapping)>` — parses `config.yaml` into the typed `Config` (with `#[serde(default)]` so missing dir keys fall back to defaults) and returns the `site:` sub-map alongside. Absent file yields `(Config::default(), Mapping::new())`.
+  - [x] Add `src/site_data.rs::SiteData { site: Mapping, data: Mapping }`. **Deviation from original plan**: `data/` is loaded as **top-level files only** — `data/menu.yaml` → `data.menu`; subdirectories are skipped silently. Field renamed `config` → `site` to match the nested-`site:` decision and the Tera variable name.
+  - [x] Thread `SiteData` through the pipeline (signature change on `markup::run` and `template::run`); inject `site` and `data` into both Tera contexts (markup and template).
+  - [x] Add `src/static_copy.rs::run(&Config)` — walkdir-copy from `static/` to `output/`; called after `write` in `lib::build()`. Missing `static/` is a no-op.
+  - [x] Add `tests/fixtures/05_cascade/` with `static/robots.txt`, `config.yaml` declaring `site.title` + `site.description`, `data/menu.yaml`, and `templates/base.html` referencing all three.
+  - [x] Verify: `cargo test` passes (45 unit tests + 5 fixtures).
+  - [x] Verify: manual `cargo run -- build` in `tests/fixtures/05_cascade/` copies `static/robots.txt` and renders config + data values into `dist/index.html` byte-identical to `expected/`.
 
 - [ ] Phase 6: Permalinks — fill in the `Doc::output_path` slot with real `permalink` expansion. `Doc` already carries `output_path` from Phase 1; this slice replaces the default-mirror computation with `permalink:` expansion of `:slug`, `:yyyy`, `:mm`, `:dd`.
   - [ ] Add `slug` to `Cargo.toml`.
