@@ -136,11 +136,13 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [x] Verify: `cargo test` passes (95 unit + 9 integration fixtures). 16 new wikilink unit tests cover scanner edge cases (unmatched open, newline-in-brackets, nested open, HTML escape, outlink dedup, closer-dir wins, slug normalization) and 3 new tera_env tests cover the permalink filter on both envs plus the unknown-id_path error path.
   - [x] Verify: manual `cargo run -- build` in `tests/fixtures/09_wikilinks/` emits exactly one `warning: unresolved wikilink [[Missing]] in blog/2025/deep.md` line on stderr; `dist/` matches `expected/` byte-for-byte.
 
-- [ ] Phase 10: `backlinks` filter — register `backlinks` on the template env only; accepts `order_by` (`title` | `created` | `updated`) and `sort`.
-  - [ ] Add `backlinks` filter implementation in `src/tera_env.rs` — for a given doc id, linear-scan `index.docs` and collect any whose `outlinks` contain that id. Sort and return. No persistent graph.
-  - [ ] Add `tests/fixtures/10_backlinks/` where doc `a.md` links to `b.md` via wikilink and `b.md` renders its backlinks as a list.
-  - [ ] Verify: `cargo test` confirms `b.html` lists `a` in its backlinks block.
-  - [ ] Verify: negative test asserts `backlinks` is unavailable in markup.
+- [x] Phase 10: `backlinks` filter — register `backlinks` on the template env only; accepts `order_by` (`title` | `created` | `updated`) and `sort`.
+  - [x] Added `src/backlinks.rs` (`Backlinks { order_by, sort }`, `from_kwargs`, `evaluate`, `register`). **Deviation from plan**: implementation lives in its own module rather than inline in `src/tera_env.rs`, mirroring `src/query.rs`. Reuses `OrderKey`/`SortDir` from `query.rs` instead of redefining. `limit`/`path`/`tag` kwargs are intentionally rejected — the surface stays narrow per spec §8.
+  - [x] Registered as a Tera **filter** (not function): `{{ doc.id_path | backlinks(order_by="title", sort="asc") }}`. Wired into `build_template_env` only; markup env unchanged.
+  - [x] Added `tests/fixtures/10_backlinks/` with three docs — `a.md` (Aardvark) and `c.md` (Crocodile) both wikilink to `b.md`; `b.md`'s template renders them via the filter with `order_by="title" sort="asc"` to prove ordering kicks in.
+  - [x] Verify: `cargo test` passes (113 unit + 10 integration fixtures). `b.html` renders `<ul><li>Aardvark</li><li>Crocodile</li></ul>`.
+  - [x] Verify: `markup_env_does_not_register_backlinks` (function form) and new `markup_env_does_not_register_backlinks_as_filter` (filter form) both pass — spec §11 invariant guarded in both syntaxes. New `template_env_registers_backlinks` positive test passes.
+  - [x] Verify: manual `cargo run -- build` against the fixture produces `dist/b.html` byte-identical to `expected/b.html`.
 
 - [ ] Phase 11: Tera macros for markup — author-defined macros in `templates/macros/**/*.html` are auto-imported into the markup-phase env so Markdown bodies can call them as shortcodes; macros run before Markdown render per spec §6 / §10.
   - [ ] Update markup env builder to discover `templates/macros/*.html` and inject `{% import … as <stem> %}` automatically.

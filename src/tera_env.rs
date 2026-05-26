@@ -1,3 +1,4 @@
+use crate::backlinks;
 use crate::config::Config;
 use crate::doc::Doc;
 use crate::permalink;
@@ -26,6 +27,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> {
 pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> {
     let mut env = load_templates(config)?;
     query::register(&mut env, docs.clone());
+    backlinks::register(&mut env, docs.clone());
     register_permalink(&mut env, docs);
     Ok(env)
 }
@@ -94,6 +96,14 @@ mod tests {
     }
 
     #[test]
+    fn markup_env_does_not_register_backlinks_as_filter() {
+        // Spec §11: even the filter form must fail on the markup env.
+        let mut env = build_markup_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let ctx = tera::Context::new();
+        assert!(env.render_str("{{ 'a.md' | backlinks }}", &ctx).is_err());
+    }
+
+    #[test]
     fn missing_templates_dir_is_not_an_error() {
         // Fixtures 01 and 02 have no templates/ dir; the env must still build.
         assert!(build_markup_env(&cfg_without_templates(), empty_snapshot()).is_ok());
@@ -106,6 +116,19 @@ mod tests {
         let mut env = env;
         let out = env
             .render_str("{{ query() | length }}", &tera::Context::new())
+            .unwrap();
+        assert_eq!(out, "0");
+    }
+
+    #[test]
+    fn template_env_registers_backlinks() {
+        let mut env =
+            build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let out = env
+            .render_str(
+                "{{ 'missing.md' | backlinks | length }}",
+                &tera::Context::new(),
+            )
             .unwrap();
         assert_eq!(out, "0");
     }

@@ -1,3 +1,4 @@
+pub mod backlinks;
 pub mod config;
 pub mod doc;
 pub mod frontmatter;

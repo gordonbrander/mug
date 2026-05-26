@@ -155,3 +155,8 @@ fn generators() {
 fn wikilinks() {
     run_build("09_wikilinks");
 }
+
+#[test]
+fn backlinks() {
+    run_build("10_backlinks");
+}
