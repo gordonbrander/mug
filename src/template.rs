@@ -33,6 +33,9 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
         );
         ctx.insert("site", &site_data.site);
         ctx.insert("data", &site_data.data);
+        if let Some(pagination) = doc.data.get("pagination") {
+            ctx.insert("pagination", pagination);
+        }
 
         doc.content = env.render(&template_name, &ctx).with_context(|| {
             format!(

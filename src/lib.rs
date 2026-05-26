@@ -2,6 +2,7 @@ pub mod config;
 pub mod doc;
 pub mod frontmatter;
 pub mod generate;
+pub mod generator;
 pub mod index;
 pub mod markup;
 pub mod permalink;
@@ -23,7 +24,7 @@ pub fn build() -> Result<()> {
     let site_data = SiteData::load(&config, site)?;
     let mut index = read::run(&config)?;
     markup::run(&config, &site_data, &mut index)?;
-    generate::run(&config, &mut index)?;
+    generate::run(&config, &site_data, &mut index)?;
     template::run(&config, &site_data, &mut index)?;
     write::run(&config, &index)?;
     static_copy::run(&config)?;

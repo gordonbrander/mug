@@ -112,15 +112,18 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [x] Verify: existing `tera_env::tests::markup_env_does_not_register_query` (and `…backlinks`) still pass — these guard the spec §11 "no index-backed filters in markup" invariant. Plus a new `template_env_registers_query` positive test.
   - [x] Verify: manual `cargo run -- build` in `tests/fixtures/07_query/` produces `dist/index.html` listing the posts in date-desc order.
 
-- [ ] Phase 8: Generators + pagination — fill in the `src/generate.rs` stub left in Phase 1. Introduce `Generator` and `Pagination` types; emit `Doc` descriptors that join the existing `Index`.
-  - [ ] Add `src/generator.rs::Generator { id_path, query, per_page: Option<usize>, permalink: String, template: Option<String>, order: i32, body: String }`.
-  - [ ] Add `src/generator.rs::Pagination { current: usize, total: usize, prev_url: Option<String>, next_url: Option<String>, items: Vec<DocId> }`.
-  - [ ] Implement `src/generate.rs::run` — read each file in `generators/`, parse frontmatter into a `Generator`, sort by `order` ascending, evaluate the query for each, chunk by `per_page`, build a `Doc` per page with `pagination` stashed in `doc.data`.
-  - [ ] After fan-out, run the markup step over each new descriptor and insert into the index so high-`order` generators (e.g. sitemap at `9999`) observe everything emitted before them.
-  - [ ] Extend `permalink::expand` to support `:page` for pagination patterns.
-  - [ ] Add `tests/fixtures/08_generators/` with five posts and a generator producing paginated index pages (2 per page).
-  - [ ] Verify: `cargo test` confirms three pages emitted with correct prev/next URLs and item slices.
-  - [ ] Verify: a sitemap-like generator with `order: 9999` sees a doc emitted by an earlier generator (asserted in fixture).
+- [x] Phase 8: Generators + pagination — fill in the `src/generate.rs` stub left in Phase 1. Introduce `Generator` and `Pagination` types; emit `Doc` descriptors that join the existing `Index`.
+  - [x] Add `src/generator.rs::Generator { id_path, query, per_page: Option<usize>, permalink: String, template: Option<String>, weight: i32, body: String, data: Mapping }`. **Deviation**: renamed spec.md's `order` field to `weight` to disambiguate from `query.order_by`. Also kept the full frontmatter `Mapping` so generator templates can reference arbitrary author-supplied fields via `{{ doc.data.xxx }}`.
+  - [x] Add `src/generator.rs::Pagination { current: usize, total: usize, prev_url: Option<String>, next_url: Option<String>, items: Vec<Doc> }`. **Deviation**: `items` is `Vec<Doc>` (full clones) rather than `Vec<DocId>` because there is no `permalink` filter yet to resolve IDs back to URLs/titles in templates. Phase 9 may revisit this.
+  - [x] Add `Query::from_yaml_mapping(&Mapping) -> Result<Self>` (in `src/query.rs`) so generator frontmatter's `query:` sub-mapping uses the same field names as the Tera `query(...)` kwargs.
+  - [x] Implement `src/generate.rs::run` — walk `generators/`, parse each via `Generator::parse`, sort by `weight` ascending, evaluate the query for each, chunk by `per_page`, build a `Doc` per page with `pagination` serialized into `doc.data`. **Deviation**: `generate::run` signature gained `&SiteData` so emitted docs can be markup-rendered with the same context shape as authored content.
+  - [x] After fan-out, call `markup::render` on each emitted descriptor and insert into the index. Refactored `markup::run`'s per-doc body into a public `markup::render(env, site_data, doc)` helper for this reuse. Both markup and template phases now also inject `doc.data.pagination` as a top-level `pagination` context key.
+  - [x] Extend `permalink::expand` to support `:page` (added `page: Option<usize>` parameter). Also added `permalink::to_url(output_path) -> String` for prev/next URL building (Phase 9 will reuse it for the `permalink` filter).
+  - [x] **Deviation**: `Doc::kind()` default arm changed from `Markdown` to `Html` so generator-emitted `.xml` (sitemap, feed.xml, etc.) bypasses pulldown-cmark. Authored content is unaffected because `read::run` filters to `md|html|yaml`.
+  - [x] Generator-emitted docs use their resolved `output_path` as `id_path` so sitemap-style queries naturally include them.
+  - [x] Add `tests/fixtures/08_generators/` with five posts, a `blog.html` generator (per_page=2 → 3 pages), and a `sitemap.xml` generator (`weight: 9999`).
+  - [x] Verify: `cargo test` passes (76 unit + 8 integration fixtures). Three blog pages emitted with the expected `prev:/blog/page-N/` and `next:/blog/page-N/` URLs and item slices.
+  - [x] Verify: `dist/sitemap.xml` lists the three `blog/page-N/index.html` paths after the five posts — proof that the high-`weight` sitemap sees docs emitted by the lower-`weight` blog generator.
 
 - [ ] Phase 9: Wikilinks + `permalink` filter — resolve `[[Wiki Link]]` / `[[Wiki Link|Display]]` in markup; register `permalink` filter on both envs. Backlinks are computed on demand by linear scan in Phase 10 — no graph stored on `Index`.
   - [ ] Add `src/wikilink.rs::expand(body, doc, &mut Index) -> String` — scan-and-replace pass run before Markdown render; emits `<a href="…">…</a>` with the resolved URL. Records the source→target edge as a field on the doc (e.g. `doc.outlinks: Vec<PathBuf>`) so Phase 10 can compute backlinks by scanning all docs' outlinks.

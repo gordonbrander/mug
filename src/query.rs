@@ -1,5 +1,7 @@
 use crate::doc::Doc;
+use anyhow::{Result, anyhow};
 use globset::{Glob, GlobBuilder, GlobMatcher};
+use serde_yaml_ng::{Mapping, Value as YamlValue};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tera::{Tera, Value};
@@ -110,6 +112,91 @@ impl Query {
             let n = v
                 .as_u64()
                 .ok_or_else(|| tera::Error::msg("query: `limit` must be a non-negative integer"))?;
+            q.limit = Some(n as usize);
+        }
+
+        Ok(q)
+    }
+
+    /// Build from a YAML map (e.g. the `query:` sub-mapping in a generator's
+    /// frontmatter). Same field names and validation as `from_kwargs`. Kept as
+    /// a sibling rather than collapsed into a single generic, because
+    /// serde_yaml_ng::Value and tera::Value have different shapes and the
+    /// parsing is small enough that abstraction would cost more than it saves.
+    pub fn from_yaml_mapping(m: &Mapping) -> Result<Self> {
+        for k in m.keys() {
+            let key = k
+                .as_str()
+                .ok_or_else(|| anyhow!("query: keys must be strings"))?;
+            if !KNOWN_KEYS.contains(&key) {
+                return Err(anyhow!(
+                    "query: unknown key `{}` (allowed: {})",
+                    key,
+                    KNOWN_KEYS.join(", ")
+                ));
+            }
+        }
+
+        let mut q = Self::default();
+
+        if let Some(v) = m.get("path") {
+            let s = v
+                .as_str()
+                .ok_or_else(|| anyhow!("query: `path` must be a string"))?;
+            let glob = GlobBuilder::new(s)
+                .literal_separator(true)
+                .build()
+                .map_err(|e| anyhow!("query: invalid glob `{}`: {}", s, e))?;
+            q.path = Some(glob);
+        }
+
+        if let Some(v) = m.get("tag") {
+            let s = v
+                .as_str()
+                .ok_or_else(|| anyhow!("query: `tag` must be a string"))?;
+            q.tag = Some(s.to_string());
+        }
+
+        if let Some(v) = m.get("order_by") {
+            let s = v
+                .as_str()
+                .ok_or_else(|| anyhow!("query: `order_by` must be a string"))?;
+            q.order_by = match s {
+                "title" => OrderKey::Title,
+                "created" => OrderKey::Created,
+                "updated" => OrderKey::Updated,
+                other => {
+                    return Err(anyhow!(
+                        "query: `order_by` must be one of title|created|updated (got `{}`)",
+                        other
+                    ));
+                }
+            };
+        }
+
+        if let Some(v) = m.get("sort") {
+            let s = v
+                .as_str()
+                .ok_or_else(|| anyhow!("query: `sort` must be a string"))?;
+            q.sort = match s {
+                "asc" => SortDir::Asc,
+                "desc" => SortDir::Desc,
+                other => {
+                    return Err(anyhow!(
+                        "query: `sort` must be one of asc|desc (got `{}`)",
+                        other
+                    ));
+                }
+            };
+        }
+
+        if let Some(v) = m.get("limit") {
+            let n = match v {
+                YamlValue::Number(n) => n
+                    .as_u64()
+                    .ok_or_else(|| anyhow!("query: `limit` must be a non-negative integer"))?,
+                _ => return Err(anyhow!("query: `limit` must be an integer")),
+            };
             q.limit = Some(n as usize);
         }
 
@@ -249,6 +336,39 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("path".to_string(), val_str("[unterminated"));
         assert!(Query::from_kwargs(&args).is_err());
+    }
+
+    fn yaml_mapping(s: &str) -> Mapping {
+        serde_yaml_ng::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn from_yaml_mapping_empty_is_default() {
+        let q = Query::from_yaml_mapping(&Mapping::new()).unwrap();
+        assert!(q.path.is_none());
+        assert!(q.tag.is_none());
+        assert_eq!(q.order_by, OrderKey::Created);
+        assert_eq!(q.sort, SortDir::Desc);
+        assert!(q.limit.is_none());
+    }
+
+    #[test]
+    fn from_yaml_mapping_all_fields() {
+        let m = yaml_mapping(
+            "path: \"posts/*.md\"\ntag: journal\norder_by: title\nsort: asc\nlimit: 4\n",
+        );
+        let q = Query::from_yaml_mapping(&m).unwrap();
+        assert!(q.path.is_some());
+        assert_eq!(q.tag.as_deref(), Some("journal"));
+        assert_eq!(q.order_by, OrderKey::Title);
+        assert_eq!(q.sort, SortDir::Asc);
+        assert_eq!(q.limit, Some(4));
+    }
+
+    #[test]
+    fn from_yaml_mapping_unknown_key_errors() {
+        let m = yaml_mapping("paht: x\n");
+        assert!(Query::from_yaml_mapping(&m).is_err());
     }
 
     #[test]

@@ -228,10 +228,11 @@ path:pages/*.md, tag:journal order_by:updated sort:desc
 - **`per_page`** — items per output page; defaults to infinity (single page).
   Fan-out by page produces the paginated descriptors, each receiving a
   pagination context (current page, total pages, prev/next URLs, item slice).
-- **`order`** (integer) — controls generator execution order within phase 3.
+- **`weight`** (integer) — controls generator execution order within phase 3.
   Generators that must see other generators' output set a high value; e.g. a
-  **sitemap** uses `order: 9999` to run last and observe everything emitted
-  before it.
+  **sitemap** uses `weight: 9999` to run last and observe everything emitted
+  before it. (Implementation note: this field was originally named `order`
+  in this spec; renamed to `weight` to disambiguate from `query.order_by`.)
 
 ---
 

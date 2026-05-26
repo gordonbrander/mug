@@ -21,9 +21,9 @@ pub struct Doc {
 }
 
 /// Derived from `id_path` extension at dispatch time — there is no `kind`
-/// field on `Doc` to keep in sync. `read::run` already filters extensions to
-/// `md|html|yaml`, so the default arm of `Doc::kind` is unreachable in
-/// practice.
+/// field on `Doc` to keep in sync. `read::run` filters authored content to
+/// `md|html|yaml`. The default arm is `Html` so generator-emitted docs
+/// (`.xml`, etc.) pass through Tera without running through pulldown-cmark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocKind {
     Markdown,
@@ -94,13 +94,15 @@ impl Doc {
     }
 
     /// Returns the kind of this doc as derived from `id_path`'s extension.
-    /// The default arm returns `Markdown` but is unreachable in practice —
-    /// `read::run` filters to `md|html|yaml` before any Doc is constructed.
+    /// `.md` → Markdown; `.yaml` → Yaml; everything else → Html. Authored
+    /// content always has one of those three extensions (read::run filters);
+    /// generator-emitted docs can have anything (e.g. `.xml`) and need the
+    /// Html (Tera-only, no Markdown render) treatment.
     pub fn kind(&self) -> DocKind {
         match self.id_path.extension().and_then(|e| e.to_str()) {
-            Some("html") => DocKind::Html,
+            Some("md") => DocKind::Markdown,
             Some("yaml") => DocKind::Yaml,
-            _ => DocKind::Markdown,
+            _ => DocKind::Html,
         }
     }
 
@@ -145,7 +147,7 @@ impl Doc {
 
 fn resolve_output_path(id_path: &Path, data: &Mapping, date: &DateTime<Utc>) -> PathBuf {
     match data.get("permalink").and_then(Value::as_str) {
-        Some(pattern) => permalink::expand(pattern, id_path, date),
+        Some(pattern) => permalink::expand(pattern, id_path, date, None),
         None => permalink::default_for(id_path),
     }
 }
@@ -297,13 +299,15 @@ mod tests {
         let md = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new());
         let html = Doc::new(PathBuf::from("p.html"), String::new(), Mapping::new());
         let yaml = Doc::new(PathBuf::from("p.yaml"), String::new(), Mapping::new());
-        let unknown = Doc::new(PathBuf::from("p.txt"), String::new(), Mapping::new());
+        let xml = Doc::new(PathBuf::from("p.xml"), String::new(), Mapping::new());
         let extless = Doc::new(PathBuf::from("p"), String::new(), Mapping::new());
         assert_eq!(md.kind(), DocKind::Markdown);
         assert_eq!(html.kind(), DocKind::Html);
         assert_eq!(yaml.kind(), DocKind::Yaml);
-        assert_eq!(unknown.kind(), DocKind::Markdown);
-        assert_eq!(extless.kind(), DocKind::Markdown);
+        // Unknown / extensionless default to Html so generator-emitted docs
+        // (e.g. sitemap.xml) bypass the Markdown render.
+        assert_eq!(xml.kind(), DocKind::Html);
+        assert_eq!(extless.kind(), DocKind::Html);
     }
 
     #[test]

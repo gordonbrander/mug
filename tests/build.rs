@@ -145,3 +145,8 @@ fn permalinks() {
 fn query() {
     run_build("07_query");
 }
+
+#[test]
+fn generators() {
+    run_build("08_generators");
+}
