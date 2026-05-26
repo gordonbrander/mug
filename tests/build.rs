@@ -52,7 +52,18 @@ fn run_build(fixture: &str) {
     let _ = fs::remove_dir_all(&temp_root);
     fs::create_dir_all(&temp_root).unwrap();
 
-    copy_dir_recursive(&fixture_dir.join("content"), &temp_root.join("content")).unwrap();
+    for entry in fs::read_dir(&fixture_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name() == "expected" {
+            continue;
+        }
+        let dest = temp_root.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_recursive(&entry.path(), &dest).unwrap();
+        } else {
+            fs::copy(entry.path(), &dest).unwrap();
+        }
+    }
 
     let prev_cwd = std::env::current_dir().unwrap();
     std::env::set_current_dir(&temp_root).unwrap();
@@ -108,4 +119,9 @@ fn skeleton() {
 #[test]
 fn frontmatter() {
     run_build("02_frontmatter");
+}
+
+#[test]
+fn templates() {
+    run_build("03_templates");
 }

@@ -1,10 +1,12 @@
 use crate::frontmatter;
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
+use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Serialize)]
 pub struct Doc {
     pub id_path: PathBuf,
     pub output_path: PathBuf,

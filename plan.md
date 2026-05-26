@@ -65,14 +65,15 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [x] Verify: `cargo test` passes (23 unit tests + 2 integration fixtures).
   - [x] Verify: manual build of `02_frontmatter` strips the frontmatter from output.
 
-- [ ] Phase 3: Tera template phase — fill in the `src/template.rs` stub with real Tera rendering; load `templates/`; `doc.template` selects a template. Markup phase also runs Tera over bodies (restricted: no `query`/`backlinks` registered yet).
-  - [ ] Add `tera` to `Cargo.toml`.
-  - [ ] Add `src/tera_env.rs` with `build_markup_env(&Config) -> Tera` (restricted) and `build_template_env(&Config) -> Tera` (full). Both load `templates/**/*.html` and `templates/**/*.xml`. Filter registration is the only difference; the registry is the seam later phases extend.
-  - [ ] Update `src/markup.rs`: for `.md` bodies run restricted Tera over the body string before Markdown render.
-  - [ ] Update `src/template.rs`: for each `Doc`, render its `doc.template` (default: passthrough) against a context `{ doc, page: { content: doc.content } }`.
-  - [ ] Add `tests/fixtures/03_templates/` with `templates/base.html`, a doc declaring `template: base.html`, and expected wrapped output.
-  - [ ] Verify: `cargo test` passes; a negative test confirms the restricted env errors when a body calls `query`/`backlinks`.
-  - [ ] Verify: manual build of `03_templates` produces the templated HTML.
+- [x] Phase 3: Tera template phase — fill in the `src/template.rs` stub with real Tera rendering; load `templates/`; `doc.template` selects a template. Markup phase also runs Tera over bodies (restricted: no `query`/`backlinks` registered yet).
+  - [x] Add `tera` to `Cargo.toml`.
+  - [x] Add `src/tera_env.rs` with `build_markup_env(&Config) -> Tera` (restricted) and `build_template_env(&Config) -> Tera` (full). Both load `templates/**/*.{html,xml}` via a single brace-expansion glob (Tera's globwalk-backed `Tera::new` handles it). Missing `templates/` returns `Tera::default()` so fixtures without a templates dir still work. Filter registration is the only difference; the registry is the seam later phases extend.
+  - [x] Update `src/markup.rs`: for `.md` bodies run restricted Tera over the body string before Markdown render. Signature gained `&Config`. Also added `#[derive(Serialize)]` on `Doc` so it can be inserted into a `tera::Context` directly.
+  - [x] Update `src/template.rs`: for each `Doc`, render its `doc.template` (default: passthrough — `None` skips this phase entirely) against a context `{ doc, page: { content: doc.content } }`. `page` uses a small local `Page<'a>` struct to avoid a `serde_json` direct dep.
+  - [x] Add `tests/fixtures/03_templates/` with `templates/base.html`, a doc declaring `template: base.html`, and expected wrapped output.
+  - [x] Generalized `tests/build.rs::run_build` once: now copies every entry in the fixture dir except `expected/`. Unblocks `templates/` for Phase 3 and `static/`/`data/`/`config.yaml`/`generators/` for later phases without touching the harness again.
+  - [x] Verify: `cargo test` passes (29 unit tests + 3 fixtures); negative unit tests in `tera_env::tests` confirm the markup env errors when a body calls `query()` or `backlinks()`.
+  - [x] Verify: manual `cargo run -- build` in `tests/fixtures/03_templates/` produces a byte-identical `dist/post.html`.
 
 - [ ] Phase 4: HTML and YAML input types — extend the `read` phase dispatch and the markup branch table. The `Doc` shape is unchanged; this slice just teaches the existing pipeline to produce a `Doc` from `.html` and `.yaml` sources.
   - [ ] Add a `DocKind { Markdown, Html, Yaml }` enum on `Doc` (or compute it from extension at markup time — pick one and document the choice in `doc.rs`).
