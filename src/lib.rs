@@ -3,6 +3,7 @@ pub mod doc;
 pub mod frontmatter;
 pub mod generate;
 pub mod generator;
+pub mod html;
 pub mod index;
 pub mod markup;
 pub mod permalink;
@@ -12,6 +13,7 @@ pub mod site_data;
 pub mod static_copy;
 pub mod template;
 pub mod tera_env;
+pub mod wikilink;
 pub mod write;
 
 use anyhow::Result;

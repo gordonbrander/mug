@@ -18,6 +18,7 @@ pub struct Doc {
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     pub data: Mapping,
+    pub outlinks: Vec<PathBuf>,
 }
 
 /// Derived from `id_path` extension at dispatch time — there is no `kind`
@@ -43,6 +44,7 @@ impl Default for Doc {
             date: DateTime::<Utc>::UNIX_EPOCH,
             updated: DateTime::<Utc>::UNIX_EPOCH,
             data: Mapping::new(),
+            outlinks: Vec::new(),
         }
     }
 }
@@ -68,6 +70,7 @@ impl Doc {
             date,
             updated,
             data,
+            outlinks: Vec::new(),
         }
     }
 

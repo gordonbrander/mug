@@ -150,3 +150,8 @@ fn query() {
 fn generators() {
     run_build("08_generators");
 }
+
+#[test]
+fn wikilinks() {
+    run_build("09_wikilinks");
+}

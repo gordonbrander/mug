@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_yaml_ng::Value;
 use std::fs;
+use std::sync::Arc;
 use walkdir::WalkDir;
 
 pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
@@ -44,7 +45,10 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
     // emitted by earlier generators (spec §9.1).
     generators.sort_by_key(|g| g.weight);
 
-    let mut markup_env = build_markup_env(config)?;
+    // Snapshot the (post-authored-markup) index for wikilink resolution and
+    // the `permalink` filter in generator bodies.
+    let snapshot = Arc::new(index.docs.clone());
+    let mut markup_env = build_markup_env(config, snapshot.clone())?;
 
     for g in generators {
         let matched: Vec<Doc> = query::evaluate(&g.query, &index.docs)
@@ -113,9 +117,10 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
                 date: epoch(),
                 updated: epoch(),
                 data,
+                outlinks: Vec::new(),
             };
 
-            markup::render(&mut markup_env, site_data, &mut doc)?;
+            markup::render(&mut markup_env, site_data, &mut doc, &snapshot)?;
             index.insert(doc);
         }
     }
