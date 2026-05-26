@@ -20,8 +20,7 @@ pub fn run(config: &Config) -> Result<Index> {
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
-        // Phase 4 will add .html and .yaml.
-        if ext != "md" {
+        if !matches!(ext, "md" | "html" | "yaml") {
             continue;
         }
         let id_path = path

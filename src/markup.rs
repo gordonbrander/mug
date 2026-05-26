@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::doc::DocKind;
 use crate::index::Index;
 use crate::tera_env::build_markup_env;
 use anyhow::{Context, Result};
@@ -19,10 +20,15 @@ pub fn run(config: &Config, index: &mut Index) -> Result<()> {
             .render_str(&doc.content, &ctx)
             .with_context(|| format!("markup-phase Tera in {}", doc.id_path.display()))?;
 
-        let parser = Parser::new(&rendered);
-        let mut html_out = String::new();
-        html::push_html(&mut html_out, parser);
-        doc.content = html_out;
+        doc.content = match doc.kind() {
+            DocKind::Markdown => {
+                let parser = Parser::new(&rendered);
+                let mut html_out = String::new();
+                html::push_html(&mut html_out, parser);
+                html_out
+            }
+            DocKind::Html | DocKind::Yaml => rendered,
+        };
     }
     Ok(())
 }

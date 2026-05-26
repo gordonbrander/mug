@@ -19,6 +19,17 @@ pub struct Doc {
     pub data: Mapping,
 }
 
+/// Derived from `id_path` extension at dispatch time — there is no `kind`
+/// field on `Doc` to keep in sync. `read::run` already filters extensions to
+/// `md|html|yaml`, so the default arm of `Doc::kind` is unreachable in
+/// practice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocKind {
+    Markdown,
+    Html,
+    Yaml,
+}
+
 impl Default for Doc {
     fn default() -> Doc {
         Doc {
@@ -68,6 +79,30 @@ impl Doc {
         Ok(Doc::new(id_path, body.to_string(), data))
     }
 
+    /// Build a Doc from a `.yaml` source: the whole file is the data map; the
+    /// `content` field (if present and a string) becomes the body. Non-string
+    /// or missing `content` defaults to an empty body.
+    pub fn parse_yaml(id_path: PathBuf, source: &str) -> Result<Doc> {
+        let data = frontmatter::parse_yaml(source)?;
+        let content = data
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_default();
+        Ok(Doc::new(id_path, content, data))
+    }
+
+    /// Returns the kind of this doc as derived from `id_path`'s extension.
+    /// The default arm returns `Markdown` but is unreachable in practice —
+    /// `read::run` filters to `md|html|yaml` before any Doc is constructed.
+    pub fn kind(&self) -> DocKind {
+        match self.id_path.extension().and_then(|e| e.to_str()) {
+            Some("html") => DocKind::Html,
+            Some("yaml") => DocKind::Yaml,
+            _ => DocKind::Markdown,
+        }
+    }
+
     /// Read `content_dir.join(id_path)` from disk, parse it, and apply the
     /// filesystem-based fallback chain for `date` (created → modified) and
     /// `updated` (modified) when frontmatter didn't supply a parseable value.
@@ -77,8 +112,12 @@ impl Doc {
             .with_context(|| format!("could not read {}", fs_path.display()))?;
         let meta = fs::metadata(&fs_path)
             .with_context(|| format!("could not stat {}", fs_path.display()))?;
-        let mut doc = Doc::parse(id_path.to_path_buf(), &source)
-            .with_context(|| format!("could not parse {}", fs_path.display()))?;
+        let parsed = match id_path.extension().and_then(|e| e.to_str()) {
+            Some("yaml") => Doc::parse_yaml(id_path.to_path_buf(), &source),
+            _ => Doc::parse(id_path.to_path_buf(), &source),
+        };
+        let mut doc =
+            parsed.with_context(|| format!("could not parse {}", fs_path.display()))?;
 
         if parse_date(doc.data.get("date")).is_none() {
             doc.date = meta
@@ -238,6 +277,64 @@ mod tests {
         drop(f);
         let d = Doc::load(&dir, Path::new("post.md")).unwrap();
         assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn kind_dispatches_on_extension() {
+        let md = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new());
+        let html = Doc::new(PathBuf::from("p.html"), String::new(), Mapping::new());
+        let yaml = Doc::new(PathBuf::from("p.yaml"), String::new(), Mapping::new());
+        let unknown = Doc::new(PathBuf::from("p.txt"), String::new(), Mapping::new());
+        let extless = Doc::new(PathBuf::from("p"), String::new(), Mapping::new());
+        assert_eq!(md.kind(), DocKind::Markdown);
+        assert_eq!(html.kind(), DocKind::Html);
+        assert_eq!(yaml.kind(), DocKind::Yaml);
+        assert_eq!(unknown.kind(), DocKind::Markdown);
+        assert_eq!(extless.kind(), DocKind::Markdown);
+    }
+
+    #[test]
+    fn parse_yaml_extracts_content_and_uplifts() {
+        let source = "title: Hi\ntags: [a, b]\ndate: 2025-10-31\ncontent: \"<p>body</p>\"\n";
+        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), source).unwrap();
+        assert_eq!(d.title, "Hi");
+        assert_eq!(d.tags, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
+        assert_eq!(d.content, "<p>body</p>");
+    }
+
+    #[test]
+    fn parse_yaml_defaults_content_when_missing() {
+        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), "title: Hi\n").unwrap();
+        assert_eq!(d.content, "");
+    }
+
+    #[test]
+    fn parse_yaml_defaults_content_when_non_string() {
+        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), "content: 42\n").unwrap();
+        assert_eq!(d.content, "");
+    }
+
+    #[test]
+    fn parse_yaml_errors_on_malformed_yaml() {
+        assert!(Doc::parse_yaml(PathBuf::from("p.yaml"), "title: [unterminated").is_err());
+    }
+
+    #[test]
+    fn parse_yaml_output_path_swaps_to_html() {
+        let d = Doc::parse_yaml(PathBuf::from("page.yaml"), "title: Hi\n").unwrap();
+        assert_eq!(d.output_path, PathBuf::from("page.html"));
+    }
+
+    #[test]
+    fn load_dispatches_yaml_to_parse_yaml() {
+        let dir = tempdir();
+        let path = dir.join("doc.yaml");
+        fs::write(&path, "title: From YAML\ncontent: \"<p>hi</p>\"\n").unwrap();
+        let d = Doc::load(&dir, Path::new("doc.yaml")).unwrap();
+        assert_eq!(d.title, "From YAML");
+        assert_eq!(d.content, "<p>hi</p>");
         let _ = fs::remove_dir_all(&dir);
     }
 

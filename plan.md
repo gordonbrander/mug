@@ -75,13 +75,13 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [x] Verify: `cargo test` passes (29 unit tests + 3 fixtures); negative unit tests in `tera_env::tests` confirm the markup env errors when a body calls `query()` or `backlinks()`.
   - [x] Verify: manual `cargo run -- build` in `tests/fixtures/03_templates/` produces a byte-identical `dist/post.html`.
 
-- [ ] Phase 4: HTML and YAML input types — extend the `read` phase dispatch and the markup branch table. The `Doc` shape is unchanged; this slice just teaches the existing pipeline to produce a `Doc` from `.html` and `.yaml` sources.
-  - [ ] Add a `DocKind { Markdown, Html, Yaml }` enum on `Doc` (or compute it from extension at markup time — pick one and document the choice in `doc.rs`).
-  - [ ] Extend `src/read.rs` to recognize `.html` and `.yaml` and build `Doc`s via `Doc::from_source` (Markdown/HTML) or a new `Doc::from_yaml(id_path, source)` (YAML — whole file is frontmatter; `content` field becomes `doc.content`).
-  - [ ] Extend `src/markup.rs`: HTML path runs restricted Tera over body, skips Markdown; YAML path runs restricted Tera on the `content` field (already pulled out at read time).
-  - [ ] Add `tests/fixtures/04_input_types/` with one of each type and expected outputs.
-  - [ ] Verify: `cargo test` passes for all three input types in the same fixture.
-  - [ ] Verify: manual build produces an HTML file per source regardless of input type.
+- [x] Phase 4: HTML and YAML input types — extend the `read` phase dispatch and the markup branch table. The `Doc` shape is unchanged; this slice just teaches the existing pipeline to produce a `Doc` from `.html` and `.yaml` sources.
+  - [x] Added `DocKind { Markdown, Html, Yaml }` plus `Doc::kind(&self) -> DocKind` that derives the kind from `id_path.extension()` — no field on `Doc` to keep in sync; single source of truth is the extension. Default arm returns `Markdown` but is unreachable in practice (`read::run` filters extensions first).
+  - [x] Widened `src/read.rs` extension filter to `matches!(ext, "md" | "html" | "yaml")`. Per-extension construction lives in `Doc::load`, which dispatches to `Doc::parse` for md/html and a new `Doc::parse_yaml` for yaml (whole file is the data map; `content` field, defaulting to `""`, becomes the body).
+  - [x] `src/markup.rs` branches on `doc.kind()`: Markdown runs Tera + `pulldown_cmark`, Html/Yaml run Tera only (no Markdown pass). The Tera context build is shared across all arms — the only branch is the post-Tera Markdown step.
+  - [x] Added `tests/fixtures/04_input_types/` with one `.md`, one `.html`, one `.yaml` source; each body contains `{{ doc.title }}` to prove restricted Tera ran for all three kinds. Expected outputs prove Markdown wraps in block-level HTML, HTML passes through, YAML's `content` field is the body source.
+  - [x] Verify: `cargo test` passes (36 unit tests + 4 integration fixtures, including `input_types`).
+  - [x] Verify: manual `cargo run -- build` in `tests/fixtures/04_input_types/` produces three `.html` files matching `expected/` byte-for-byte.
 
 - [ ] Phase 5: Static dir + `config.yaml` + `data/` cascade — extend `Config` with loaded `site` data, introduce a `SiteData` carrier for `config` + `data/`, and pass it to the template context.
   - [ ] Add `src/config.rs::Config::load(path)` — parse `config.yaml` into `Config` (merged over defaults); zero-config still works if file is absent.

@@ -125,3 +125,8 @@ fn frontmatter() {
 fn templates() {
     run_build("03_templates");
 }
+
+#[test]
+fn input_types() {
+    run_build("04_input_types");
+}
