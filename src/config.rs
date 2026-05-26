@@ -13,6 +13,16 @@ pub struct Config {
     pub static_dir: PathBuf,
     pub data_dir: PathBuf,
     pub generators_dir: PathBuf,
+    /// Origin for absolute URLs (e.g. `https://example.com`), no trailing slash.
+    /// Sourced from `site.url`. Filters that produce absolute URLs degrade
+    /// gracefully (to root-relative) when `None`.
+    #[serde(skip)]
+    pub site_url: Option<String>,
+    /// Subpath the site is hosted under (e.g. `/blog`); empty for root.
+    /// Sourced from `site.base_path`. Normalized to start with `/` and not end
+    /// with `/`.
+    #[serde(skip)]
+    pub base_path: String,
 }
 
 impl Default for Config {
@@ -24,6 +34,8 @@ impl Default for Config {
             static_dir: PathBuf::from("static"),
             data_dir: PathBuf::from("data"),
             generators_dir: PathBuf::from("generators"),
+            site_url: None,
+            base_path: String::new(),
         }
     }
 }
@@ -39,7 +51,7 @@ impl Config {
         }
         let source = fs::read_to_string(path)
             .with_context(|| format!("reading {}", path.display()))?;
-        let config: Self = serde_yaml_ng::from_str(&source)
+        let mut config: Self = serde_yaml_ng::from_str(&source)
             .with_context(|| format!("parsing {} into Config", path.display()))?;
         let raw: Value = serde_yaml_ng::from_str(&source)
             .with_context(|| format!("parsing {} as YAML", path.display()))?;
@@ -50,7 +62,34 @@ impl Config {
             },
             _ => Mapping::new(),
         };
+        config.site_url = site
+            .get(Value::String("url".into()))
+            .and_then(|v| v.as_str())
+            .and_then(normalize_site_url);
+        config.base_path = site
+            .get(Value::String("base_path".into()))
+            .and_then(|v| v.as_str())
+            .map(normalize_base_path)
+            .unwrap_or_default();
         Ok((config, site))
+    }
+}
+
+fn normalize_site_url(s: &str) -> Option<String> {
+    let trimmed = s.trim_end_matches('/');
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_base_path(s: &str) -> String {
+    let trimmed = s.trim_matches('/');
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("/{}", trimmed)
     }
 }
 
@@ -109,6 +148,67 @@ mod tests {
         let (_, site) = Config::load(&path).unwrap();
         assert!(site.is_empty());
         cleanup(&dir);
+    }
+
+    #[test]
+    fn normalize_site_url_strips_trailing_slash() {
+        assert_eq!(
+            normalize_site_url("https://example.com/"),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            normalize_site_url("https://example.com"),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(normalize_site_url(""), None);
+        assert_eq!(normalize_site_url("/"), None);
+    }
+
+    #[test]
+    fn normalize_base_path_re_anchors() {
+        assert_eq!(normalize_base_path(""), "");
+        assert_eq!(normalize_base_path("/"), "");
+        assert_eq!(normalize_base_path("blog"), "/blog");
+        assert_eq!(normalize_base_path("/blog"), "/blog");
+        assert_eq!(normalize_base_path("/blog/"), "/blog");
+        assert_eq!(normalize_base_path("blog/sub"), "/blog/sub");
+    }
+
+    #[test]
+    fn site_url_and_base_path_loaded_from_site_submap() {
+        let dir = tempdir();
+        let path = write_config(
+            &dir,
+            "site:\n  url: https://example.com/\n  base_path: blog\n",
+        );
+        let (config, site) = Config::load(&path).unwrap();
+        assert_eq!(config.site_url.as_deref(), Some("https://example.com"));
+        assert_eq!(config.base_path, "/blog");
+        // Raw site map still surfaces the original values for templates.
+        assert_eq!(
+            site.get(Value::String("url".into()))
+                .and_then(|v| v.as_str()),
+            Some("https://example.com/")
+        );
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn site_url_and_base_path_default_when_absent() {
+        let dir = tempdir();
+        let path = write_config(&dir, "site:\n  title: My Site\n");
+        let (config, _) = Config::load(&path).unwrap();
+        assert!(config.site_url.is_none());
+        assert_eq!(config.base_path, "");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn no_config_file_yields_empty_url_fields() {
+        let path = Path::new("/definitely/does/not/exist/config.yaml");
+        let (config, _) = Config::load(path).unwrap();
+        assert!(config.site_url.is_none());
+        assert_eq!(config.base_path, "");
     }
 
     fn tempdir() -> PathBuf {

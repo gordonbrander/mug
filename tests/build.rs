@@ -72,43 +72,72 @@ fn run_build(fixture: &str) {
 
     build_result.unwrap();
 
-    let actual = collect_files(&temp_root.join("dist"));
-    let expected = collect_files(&expected_dir);
+    let cleanup_on_panic = AssertCtx {
+        actual_root: temp_root.join("dist"),
+        expected_root: expected_dir,
+        cleanup_root: Some(temp_root.clone()),
+    };
+    cleanup_on_panic.assert_match();
+}
 
-    let matches = actual.len() == expected.len()
-        && actual
-            .iter()
-            .zip(expected.iter())
-            .all(|(a, e)| a.0 == e.0 && a.1 == e.1);
+struct AssertCtx {
+    actual_root: PathBuf,
+    expected_root: PathBuf,
+    cleanup_root: Option<PathBuf>,
+}
 
-    if !matches {
-        let mut msg = String::new();
-        msg.push_str(&format!(
-            "expected {} files, got {}\n",
-            expected.len(),
-            actual.len()
-        ));
-        for (p, b) in &expected {
-            msg.push_str(&format!("  expected: {} ({} bytes)\n", p.display(), b.len()));
-        }
-        for (p, b) in &actual {
-            msg.push_str(&format!("  actual:   {} ({} bytes)\n", p.display(), b.len()));
-        }
-        for ((ep, eb), (ap, ab)) in expected.iter().zip(actual.iter()) {
-            if ep == ap && eb != ab {
+impl AssertCtx {
+    fn assert_match(self) {
+        let actual = collect_files(&self.actual_root);
+        let expected = collect_files(&self.expected_root);
+
+        let matches = actual.len() == expected.len()
+            && actual
+                .iter()
+                .zip(expected.iter())
+                .all(|(a, e)| a.0 == e.0 && a.1 == e.1);
+
+        if !matches {
+            let mut msg = String::new();
+            msg.push_str(&format!(
+                "expected {} files, got {}\n",
+                expected.len(),
+                actual.len()
+            ));
+            for (p, b) in &expected {
                 msg.push_str(&format!(
-                    "diff in {}:\n  expected: {:?}\n  actual:   {:?}\n",
-                    ep.display(),
-                    String::from_utf8_lossy(eb),
-                    String::from_utf8_lossy(ab),
+                    "  expected: {} ({} bytes)\n",
+                    p.display(),
+                    b.len()
                 ));
             }
+            for (p, b) in &actual {
+                msg.push_str(&format!(
+                    "  actual:   {} ({} bytes)\n",
+                    p.display(),
+                    b.len()
+                ));
+            }
+            for ((ep, eb), (ap, ab)) in expected.iter().zip(actual.iter()) {
+                if ep == ap && eb != ab {
+                    msg.push_str(&format!(
+                        "diff in {}:\n  expected: {:?}\n  actual:   {:?}\n",
+                        ep.display(),
+                        String::from_utf8_lossy(eb),
+                        String::from_utf8_lossy(ab),
+                    ));
+                }
+            }
+            if let Some(root) = &self.cleanup_root {
+                let _ = fs::remove_dir_all(root);
+            }
+            panic!("{}", msg);
         }
-        let _ = fs::remove_dir_all(&temp_root);
-        panic!("{}", msg);
-    }
 
-    let _ = fs::remove_dir_all(&temp_root);
+        if let Some(root) = &self.cleanup_root {
+            let _ = fs::remove_dir_all(root);
+        }
+    }
 }
 
 #[test]
@@ -164,4 +193,38 @@ fn backlinks() {
 #[test]
 fn macros() {
     run_build("11_macros");
+}
+
+#[test]
+fn scaffold() {
+    // The 12_scaffold fixture has no input files — just an `expected/` dir.
+    // The test exercises the real scaffold code path: scaffold into a temp dir
+    // via `knead::new`, then build, then diff against `expected/`.
+    let _guard = CHDIR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture_dir = manifest_dir
+        .join("tests")
+        .join("fixtures")
+        .join("12_scaffold");
+    let expected_dir = fixture_dir.join("expected");
+
+    let temp_root = std::env::temp_dir().join("knead-test-12_scaffold");
+    let _ = fs::remove_dir_all(&temp_root);
+    fs::create_dir_all(&temp_root).unwrap();
+
+    let demo = temp_root.join("demo");
+    knead::new(&demo).unwrap();
+
+    let prev_cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&demo).unwrap();
+    let build_result = knead::build();
+    std::env::set_current_dir(&prev_cwd).unwrap();
+    build_result.unwrap();
+
+    let ctx = AssertCtx {
+        actual_root: demo.join("dist"),
+        expected_root: expected_dir,
+        cleanup_root: Some(temp_root),
+    };
+    ctx.assert_match();
 }

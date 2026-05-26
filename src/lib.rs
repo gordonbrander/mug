@@ -10,6 +10,7 @@ pub mod markup;
 pub mod permalink;
 pub mod query;
 pub mod read;
+pub mod scaffold;
 pub mod site_data;
 pub mod static_copy;
 pub mod template;
@@ -21,6 +22,10 @@ use anyhow::Result;
 use config::Config;
 use site_data::SiteData;
 use std::path::Path;
+
+pub fn new(path: &Path) -> Result<()> {
+    scaffold::run(path)
+}
 
 pub fn build() -> Result<()> {
     let (config, site) = Config::load(Path::new("config.yaml"))?;
