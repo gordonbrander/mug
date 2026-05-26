@@ -38,46 +38,46 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
 
 ## TODO
 
-- [ ] Phase 1: Type skeleton + four-phase pipeline — land the core data types (`Doc`, `Config`, `Index`) and stubbed signatures for all four phases (`read`, `markup`, `generate`, `template`), wired into a `build` command that renders one Markdown file end-to-end through every phase. Most `Doc` fields exist but stay at defaults; most phases are near-passthrough. The shape is right, the contents grow later.
-  - [ ] Add `clap` (`derive`), `walkdir`, `pulldown-cmark` (`html`), `serde` (`derive`), `serde_yaml_ng`, `chrono` (`serde`), `anyhow` to `[dependencies]`; add `insta` to `[dev-dependencies]`.
-  - [ ] Add `src/config.rs::Config` with `content_dir`, `output_dir`, `templates_dir`, `static_dir`, `data_dir`, `generators_dir`; `Default` impl returns spec §3 names; no file load yet.
-  - [ ] Add `src/doc.rs::Doc` with **all fields from spec §5** present from day one: `id_path: PathBuf`, `output_path: PathBuf`, `template: Option<String>`, `title: String`, `content: String`, `tags: Vec<String>`, `date: DateTime<Utc>`, `updated: DateTime<Utc>`, `data: serde_yaml_ng::Mapping`. Add a `Doc::from_body(id_path, body) -> Doc` constructor that fills defaults so Phase 1 can use it without frontmatter.
-  - [ ] Add `src/index.rs::Index` with `docs: Vec<Doc>`, `by_path: BTreeMap<PathBuf, usize>`; reserve (commented) slots for `by_tag` and `backlinks` to be populated later. Provide `Index::insert(doc)` and `Index::get(&id_path)`.
-  - [ ] Add `src/phases/mod.rs` re-exporting `read`, `markup`, `generate`, `template` modules.
-  - [ ] Add `src/phases/read.rs::run(&Config) -> Index` — walks `content_dir`, dispatches `.md` only, builds `Doc` via `Doc::from_body`, inserts into `Index`. (Other extensions handled in later phases.)
-  - [ ] Add `src/phases/markup.rs::run(&mut Index)` — for each doc, render `.md` body via `pulldown-cmark` into `doc.content`. (Tera, frontmatter handling, and per-type branching land in later phases.)
-  - [ ] Add `src/phases/generate.rs::run(&Config, &mut Index)` — empty stub (no-op) with a doc comment marking Phase 8.
-  - [ ] Add `src/phases/template.rs::run(&Config, &mut Index)` — passthrough; `doc.content` is the final output. (Tera lands in Phase 3.)
-  - [ ] Add `src/phases/write.rs::run(&Config, &Index)` — writes each doc's `content` to `output_dir.join(doc.output_path)`. Default `output_path` in Phase 1 mirrors `id_path` with `.html` extension.
-  - [ ] Replace `src/main.rs` hello-world with a `clap` dispatcher; `build` calls `read → markup → generate → template → write` in order.
-  - [ ] Add `tests/fixtures/01_skeleton/` with one `content/hello.md` and the expected `dist/hello.html`.
-  - [ ] Add `tests/build.rs` integration harness (helper `run_build(fixture_name)`) that runs the pipeline against a fixture and diffs the output tree against `expected/`.
-  - [ ] Verify: `cargo build` succeeds with no `dead_code` warnings on the new types (use `#[allow(dead_code)]` where genuinely deferred).
-  - [ ] Verify: `cargo test` passes the `01_skeleton` fixture.
-  - [ ] Verify: manual `cargo run -- build` in `tests/fixtures/01_skeleton/` produces `dist/hello.html`.
+- [x] Phase 1: Type skeleton + four-phase pipeline — land the core data types (`Doc`, `Config`, `Index`) and stubbed signatures for all four phases (`read`, `markup`, `generate`, `template`), wired into a `build` command that renders one Markdown file end-to-end through every phase. Most `Doc` fields exist but stay at defaults; most phases are near-passthrough. The shape is right, the contents grow later.
+  - [x] Add `clap` (`derive`), `walkdir`, `pulldown-cmark` (`html`), `serde` (`derive`), `serde_yaml_ng`, `chrono` (`serde`), `anyhow` to `[dependencies]`; add `insta` to `[dev-dependencies]`. (Note: `insta` pulled in but not yet exercised — the integration harness uses a hand-rolled tree diff for now.)
+  - [x] Add `src/config.rs::Config` with `content_dir`, `output_dir`, `templates_dir`, `static_dir`, `data_dir`, `generators_dir`; `Default` impl returns spec §3 names; no file load yet.
+  - [x] Add `src/doc.rs::Doc` with **all fields from spec §5** present from day one: `id_path: PathBuf`, `output_path: PathBuf`, `template: Option<String>`, `title: String`, `content: String`, `tags: Vec<String>`, `date: DateTime<Utc>`, `updated: DateTime<Utc>`, `data: serde_yaml_ng::Mapping`. Add a `Doc::from_body(id_path, body) -> Doc` constructor that fills defaults so Phase 1 can use it without frontmatter.
+  - [x] Add `src/index.rs::Index` with `docs: Vec<Doc>`, `by_path: BTreeMap<PathBuf, usize>`; reserve (commented) slots for `by_tag` and `backlinks` to be populated later. Provide `Index::insert(doc)` and `Index::get(&id_path)`.
+  - [x] ~~Add `src/phases/mod.rs` re-exporting~~ — **deviation**: per CLAUDE.md (modern Rust prefers `foo.rs` + sibling `foo/` over `foo/mod.rs`), the phase modules live at the crate root (`src/read.rs`, `src/markup.rs`, `src/generate.rs`, `src/template.rs`, `src/write.rs`) rather than nested under a `phases/` parent. Subsequent phases should target these top-level paths.
+  - [x] Add `src/read.rs::run(&Config) -> Index` — walks `content_dir`, dispatches `.md` only, builds `Doc` via `Doc::from_body`, inserts into `Index`. (Other extensions handled in later phases.)
+  - [x] Add `src/markup.rs::run(&mut Index)` — for each doc, render `.md` body via `pulldown-cmark` into `doc.content`. (Tera, frontmatter handling, and per-type branching land in later phases.)
+  - [x] Add `src/generate.rs::run(&Config, &mut Index)` — empty stub (no-op) with a doc comment marking Phase 8.
+  - [x] Add `src/template.rs::run(&Config, &mut Index)` — passthrough; `doc.content` is the final output. (Tera lands in Phase 3.)
+  - [x] Add `src/write.rs::run(&Config, &Index)` — writes each doc's `content` to `output_dir.join(doc.output_path)`. Default `output_path` in Phase 1 mirrors `id_path` with `.html` extension.
+  - [x] Replace `src/main.rs` hello-world with a `clap` dispatcher; `build` calls `read → markup → generate → template → write` in order. (The orchestration lives in `src/lib.rs::build()` so the integration harness can call it directly; `main.rs` is a thin CLI shim.)
+  - [x] Add `tests/fixtures/01_skeleton/` with one `content/hello.md` and the expected `dist/hello.html`.
+  - [x] Add `tests/build.rs` integration harness (helper `run_build(fixture_name)`) that runs the pipeline against a fixture and diffs the output tree against `expected/`. (Implementation `chdir`s into a temp copy of the fixture under a `Mutex` guard since `build()` reads `Config::default()` relative to cwd.)
+  - [x] Verify: `cargo build` succeeds with no `dead_code` warnings on the new types (use `#[allow(dead_code)]` where genuinely deferred).
+  - [x] Verify: `cargo test` passes the `01_skeleton` fixture.
+  - [x] Verify: manual `cargo run -- build` in `tests/fixtures/01_skeleton/` produces `dist/hello.html`.
 
 - [ ] Phase 2: Frontmatter uplift — populate the `Doc` fields that Phase 1 left at defaults by parsing the `---`-delimited YAML block.
   - [ ] Add `src/frontmatter.rs::split` returning `(Option<&str>, &str)` for the YAML block and body, plus `parse(&str) -> serde_yaml_ng::Mapping`.
   - [ ] Add `Doc::from_source(id_path, source, fs_meta)` — splits frontmatter, uplifts `title`, `template`, `tags`, `date`, `updated` per spec §5 fallback rules (date: frontmatter → created → modified; updated: frontmatter → modified), stashes the full frontmatter map in `doc.data`.
-  - [ ] Update `phases/read.rs` to use `Doc::from_source` instead of `Doc::from_body`.
+  - [ ] Update `src/read.rs` to use `Doc::from_source` instead of `Doc::from_body`.
   - [ ] Add unit tests for `frontmatter::split` (empty, missing closing `---`, body-only, CRLF) and for `Doc::from_source` (each fallback rule).
   - [ ] Add `tests/fixtures/02_frontmatter/` with a doc declaring `title`, `tags`, `date`; expected output is the rendered body only (still no template wrapping).
   - [ ] Verify: `cargo test` passes.
   - [ ] Verify: manual build of `02_frontmatter` strips the frontmatter from output and exposes uplifted fields (visible later once templates land).
 
-- [ ] Phase 3: Tera template phase — fill in the `phases/template.rs` stub with real Tera rendering; load `templates/`; `doc.template` selects a template. Markup phase also runs Tera over bodies (restricted: no `query`/`backlinks` registered yet).
+- [ ] Phase 3: Tera template phase — fill in the `src/template.rs` stub with real Tera rendering; load `templates/`; `doc.template` selects a template. Markup phase also runs Tera over bodies (restricted: no `query`/`backlinks` registered yet).
   - [ ] Add `tera` to `Cargo.toml`.
   - [ ] Add `src/tera_env.rs` with `build_markup_env(&Config) -> Tera` (restricted) and `build_template_env(&Config) -> Tera` (full). Both load `templates/**/*.html` and `templates/**/*.xml`. Filter registration is the only difference; the registry is the seam later phases extend.
-  - [ ] Update `phases/markup.rs`: for `.md` bodies run restricted Tera over the body string before Markdown render.
-  - [ ] Update `phases/template.rs`: for each `Doc`, render its `doc.template` (default: passthrough) against a context `{ doc, page: { content: doc.content } }`.
+  - [ ] Update `src/markup.rs`: for `.md` bodies run restricted Tera over the body string before Markdown render.
+  - [ ] Update `src/template.rs`: for each `Doc`, render its `doc.template` (default: passthrough) against a context `{ doc, page: { content: doc.content } }`.
   - [ ] Add `tests/fixtures/03_templates/` with `templates/base.html`, a doc declaring `template: base.html`, and expected wrapped output.
   - [ ] Verify: `cargo test` passes; a negative test confirms the restricted env errors when a body calls `query`/`backlinks`.
   - [ ] Verify: manual build of `03_templates` produces the templated HTML.
 
 - [ ] Phase 4: HTML and YAML input types — extend the `read` phase dispatch and the markup branch table. The `Doc` shape is unchanged; this slice just teaches the existing pipeline to produce a `Doc` from `.html` and `.yaml` sources.
   - [ ] Add a `DocKind { Markdown, Html, Yaml }` enum on `Doc` (or compute it from extension at markup time — pick one and document the choice in `doc.rs`).
-  - [ ] Extend `phases/read.rs` to recognize `.html` and `.yaml` and build `Doc`s via `Doc::from_source` (Markdown/HTML) or a new `Doc::from_yaml(id_path, source)` (YAML — whole file is frontmatter; `content` field becomes `doc.content`).
-  - [ ] Extend `phases/markup.rs`: HTML path runs restricted Tera over body, skips Markdown; YAML path runs restricted Tera on the `content` field (already pulled out at read time).
+  - [ ] Extend `src/read.rs` to recognize `.html` and `.yaml` and build `Doc`s via `Doc::from_source` (Markdown/HTML) or a new `Doc::from_yaml(id_path, source)` (YAML — whole file is frontmatter; `content` field becomes `doc.content`).
+  - [ ] Extend `src/markup.rs`: HTML path runs restricted Tera over body, skips Markdown; YAML path runs restricted Tera on the `content` field (already pulled out at read time).
   - [ ] Add `tests/fixtures/04_input_types/` with one of each type and expected outputs.
   - [ ] Verify: `cargo test` passes for all three input types in the same fixture.
   - [ ] Verify: manual build produces an HTML file per source regardless of input type.
@@ -86,7 +86,7 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [ ] Add `src/config.rs::Config::load(path)` — parse `config.yaml` into `Config` (merged over defaults); zero-config still works if file is absent.
   - [ ] Add `src/site_data.rs::SiteData { config: serde_yaml_ng::Mapping, data: serde_yaml_ng::Mapping }`; `load(&Config) -> SiteData` reads `data/**/*.yaml` into a nested map keyed by relative path components (e.g. `data/site/nav.yaml` → `data.site.nav`).
   - [ ] Thread `SiteData` through the pipeline (signature change on `template::run` and `markup::run`); inject `site` and `data` into the Tera context.
-  - [ ] Add `src/phases/static_copy.rs::run(&Config)` — recursive copy from `static/` to `dist/`; call after `write`.
+  - [ ] Add `src/static_copy.rs::run(&Config)` — recursive copy from `static/` to `dist/`; call after `write`.
   - [ ] Add `tests/fixtures/05_cascade/` with `static/robots.txt`, `config.yaml` declaring `site.title`, `data/menu.yaml`, a template referencing all three.
   - [ ] Verify: `cargo test` passes.
   - [ ] Verify: manual build copies `static/` and renders config + data values into the templated output.
@@ -110,10 +110,10 @@ Pulled in up front so the type skeleton in Phase 1 can be modeled against real c
   - [ ] Verify: `cargo test` passes and verifies ordering by `date desc`.
   - [ ] Verify: negative test asserts calling `query` from a Markdown body errors during markup.
 
-- [ ] Phase 8: Generators + pagination — fill in the `phases/generate.rs` stub left in Phase 1. Introduce `Generator` and `Pagination` types; emit `Doc` descriptors that join the existing `Index`.
+- [ ] Phase 8: Generators + pagination — fill in the `src/generate.rs` stub left in Phase 1. Introduce `Generator` and `Pagination` types; emit `Doc` descriptors that join the existing `Index`.
   - [ ] Add `src/generator.rs::Generator { id_path, query, per_page: Option<usize>, permalink: String, template: Option<String>, order: i32, body: String }`.
   - [ ] Add `src/generator.rs::Pagination { current: usize, total: usize, prev_url: Option<String>, next_url: Option<String>, items: Vec<DocId> }`.
-  - [ ] Implement `phases/generate.rs::run` — read each file in `generators/`, parse frontmatter into a `Generator`, sort by `order` ascending, evaluate the query for each, chunk by `per_page`, build a `Doc` per page with `pagination` stashed in `doc.data`.
+  - [ ] Implement `src/generate.rs::run` — read each file in `generators/`, parse frontmatter into a `Generator`, sort by `order` ascending, evaluate the query for each, chunk by `per_page`, build a `Doc` per page with `pagination` stashed in `doc.data`.
   - [ ] After fan-out, run the markup step over each new descriptor and insert into the index so high-`order` generators (e.g. sitemap at `9999`) observe everything emitted before them.
   - [ ] Extend `permalink::expand` to support `:page` for pagination patterns.
   - [ ] Add `tests/fixtures/08_generators/` with five posts and a generator producing paginated index pages (2 per page).
