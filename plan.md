@@ -14,32 +14,18 @@
 
 Pulled in up front so the type skeleton in Phase 1 can be modeled against real crate types (e.g. `chrono::DateTime`, `serde_yaml_ng::Mapping`) rather than placeholders that get swapped later. The list is intentionally small — the spec's "small, predictable surface area" goal applies to our dependency graph too.
 
-**Phase 1 (skeleton):**
-
 - **clap** (with `derive` feature) — CLI parsing. Derive-macro subcommands (`build`, `watch`, `new`) keep `main.rs` declarative. Mature, low-churn; the obvious default.
 - **walkdir** — recursive directory traversal for `content/`, `generators/`, `data/`, `static/`. Simple, no-config, handles symlinks correctly. Plain `std::fs::read_dir` recursion would also work but `walkdir` is a one-liner.
 - **pulldown-cmark** — CommonMark parser. Rust-native, pull-based, fast, the de-facto choice. Used in the markup phase to render `.md` bodies into `doc.content`. Enable the `html` feature.
 - **serde** (with `derive`) + **serde_yaml_ng** — frontmatter, `config.yaml`, and `data/` cascade. We pick **`serde_yaml_ng`** rather than the original `serde_yaml` because the upstream crate is unmaintained (deprecated by its author); `serde_yaml_ng` is the community fork with the same API. `Doc.data` is typed as `serde_yaml_ng::Mapping` so all frontmatter survives uplift verbatim.
 - **chrono** (with `serde` feature) — `DateTime<Utc>` for `doc.date` / `doc.updated`. Lands in Phase 1 because those fields exist on `Doc` from the start, even though Phase 2 is the first time they carry real values. Used again in Phase 6 for `:yyyy/:mm/:dd` permalink expansion.
 - **anyhow** — application-level error plumbing. We are a binary, not a library, so structured error enums (via `thiserror`) are not worth the ceremony; `anyhow::Result<T>` with `.context(...)` annotations is enough.
-
-**Phase 3 (templates):**
-
 - **tera** — Jinja-like runtime template engine. A *runtime* engine is mandatory here (users supply their own templates, so compile-time engines like `askama` are unsuitable). Tera natively supports macros (the spec's shortcode mechanism, Phase 11), custom filters (`query`, `backlinks`, `permalink`), and template inheritance. We construct two `Tera` instances — one with the restricted filter set for the markup phase, one with the full set for the template phase — so the spec §11 restricted-markup invariant is enforced by construction.
-
-**Phase 6 (permalinks):**
-
 - **slug** — sluggify document stems and wikilink targets. Used for the `:slug` permalink variable and again in Phase 9 for wikilink resolution. Tiny crate, no transitive deps worth noting.
-
-**Phase 7 (query):**
-
 - **globset** — compile glob patterns once and match many paths cheaply. Backs the `path:` operator in queries. Picked over `glob` because `globset` is built for repeated matches against a large set of paths, which is exactly the query-evaluation pattern.
-
-**Phase 13 (watch):**
-
 - **notify** (v6+, with the default debouncer) — cross-platform file watcher. Coalesces filesystem events on macOS (FSEvents), Linux (inotify), and Windows so we get one rebuild per editor save, not three.
 
-**Dev-dependencies (Phase 1 onward):**
+**Dev-dependencies:**
 
 - **insta** — snapshot testing for fixture-driven integration tests. Each phase ships a fixture site under `tests/fixtures/<phase>/` whose built output is compared against a stored snapshot, with `cargo insta review` for accepted updates. Avoids hand-maintaining `expected/` trees as the renderer evolves. Could alternatively roll our own string-diff helper, but `insta`'s review workflow pays for itself by Phase 3.
 
