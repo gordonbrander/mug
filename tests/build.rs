@@ -160,3 +160,8 @@ fn wikilinks() {
 fn backlinks() {
     run_build("10_backlinks");
 }
+
+#[test]
+fn macros() {
+    run_build("11_macros");
+}

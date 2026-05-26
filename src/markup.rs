@@ -2,12 +2,12 @@ use crate::config::Config;
 use crate::doc::{Doc, DocKind};
 use crate::index::Index;
 use crate::site_data::SiteData;
-use crate::tera_env::build_markup_env;
+use crate::tera_env::{MarkupEnv, build_markup_env};
 use crate::wikilink;
 use anyhow::{Context, Result};
 use pulldown_cmark::{Parser, html};
+use std::borrow::Cow;
 use std::sync::Arc;
-use tera::Tera;
 
 /// Run the markup phase over `doc`. Renders the body string through the
 /// restricted Tera env, expands wikilinks (Markdown only), and for `.md` docs
@@ -15,7 +15,7 @@ use tera::Tera;
 /// used by `wikilink::expand` for target resolution. Exposed publicly so
 /// `generate::run` can apply the same transformation to its emitted docs.
 pub fn render(
-    env: &mut Tera,
+    env: &mut MarkupEnv,
     site_data: &SiteData,
     doc: &mut Doc,
     snapshot: &Arc<Vec<Doc>>,
@@ -32,8 +32,17 @@ pub fn render(
     // no file extension, so HTML autoescape is off). Authors writing
     // `{{ ... }}` inside Markdown code fences should wrap them in
     // `{% raw %}` per spec §6.
+    // The macro preamble auto-imports `templates/macros/*.html` so Markdown
+    // bodies can call them as shortcodes (Phase 11). Empty when no macros
+    // exist — skip the allocation in that case.
+    let body_with_imports: Cow<str> = if env.macro_preamble.is_empty() {
+        Cow::Borrowed(doc.content.as_str())
+    } else {
+        Cow::Owned(format!("{}{}", env.macro_preamble, doc.content))
+    };
     let rendered = env
-        .render_str(&doc.content, &ctx)
+        .tera
+        .render_str(&body_with_imports, &ctx)
         .with_context(|| format!("markup-phase Tera in {}", doc.id_path.display()))?;
 
     // Wikilink expansion happens between Tera and Markdown render, for
