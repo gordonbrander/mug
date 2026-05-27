@@ -14,7 +14,19 @@ use std::time::{Duration, Instant};
 const DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub fn run() -> Result<()> {
-    rebuild();
+    watch_loop(|_| {})
+}
+
+/// Watch the source dirs and rebuild on change. The `on_rebuild` callback
+/// fires after each rebuild attempt with its `Result`, so callers (e.g.
+/// `serve`) can react to success/failure — broadcasting a reload only on `Ok`,
+/// for instance.
+pub fn watch_loop<F>(mut on_rebuild: F) -> Result<()>
+where
+    F: FnMut(&Result<()>),
+{
+    let initial = rebuild();
+    on_rebuild(&initial);
 
     let (config, _) = Config::load(Path::new("config.yaml"))?;
     let (tx, rx) = mpsc::channel();
@@ -43,17 +55,22 @@ pub fn run() -> Result<()> {
 
     for batch in rx {
         match batch {
-            Ok(_) => rebuild(),
+            Ok(_) => {
+                let result = rebuild();
+                on_rebuild(&result);
+            }
             Err(e) => eprintln!("watch error: {e}"),
         }
     }
     Ok(())
 }
 
-fn rebuild() {
+fn rebuild() -> Result<()> {
     let start = Instant::now();
-    match crate::build() {
+    let result = crate::build();
+    match &result {
         Ok(()) => eprintln!("rebuilt in {:?}", start.elapsed()),
         Err(e) => eprintln!("build failed: {e:#}"),
     }
+    result
 }

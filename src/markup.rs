@@ -2,10 +2,10 @@ use crate::config::Config;
 use crate::doc::{Doc, DocKind};
 use crate::index::Index;
 use crate::site_data::SiteData;
-use crate::tera_env::{MarkupEnv, build_markup_env};
+use crate::tera_env::{build_markup_env, MarkupEnv};
 use crate::wikilink;
 use anyhow::{Context, Result};
-use pulldown_cmark::{Parser, html};
+use pulldown_cmark::{html, Parser};
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -63,7 +63,7 @@ pub fn render(
             html::push_html(&mut html_out, parser);
             html_out
         }
-        DocKind::Html | DocKind::Yaml => after_wikilinks,
+        DocKind::Raw | DocKind::Yaml => after_wikilinks,
     };
     Ok(())
 }

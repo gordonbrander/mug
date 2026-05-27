@@ -23,13 +23,25 @@ pub struct Doc {
 
 /// Derived from `id_path` extension at dispatch time — there is no `kind`
 /// field on `Doc` to keep in sync. `read::run` filters authored content to
-/// `md|html|yaml`. The default arm is `Html` so generator-emitted docs
-/// (`.xml`, etc.) pass through Tera without running through pulldown-cmark.
+/// `md|html|yaml`. The default arm is `Raw` so generator-emitted docs
+/// (`.xml`, etc.) and authored `.html` pass through Tera without running
+/// through pulldown-cmark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocKind {
     Markdown,
-    Html,
+    Raw,
     Yaml,
+}
+
+impl From<&Path> for DocKind {
+    fn from(value: &Path) -> Self {
+        match value.extension().and_then(|e| e.to_str()) {
+            Some("md") => DocKind::Markdown,
+            Some("yaml") => DocKind::Yaml,
+            Some("yml") => DocKind::Yaml,
+            _ => DocKind::Raw,
+        }
+    }
 }
 
 impl Default for Doc {
@@ -97,16 +109,12 @@ impl Doc {
     }
 
     /// Returns the kind of this doc as derived from `id_path`'s extension.
-    /// `.md` → Markdown; `.yaml` → Yaml; everything else → Html. Authored
+    /// `.md` → Markdown; `.yaml` → Yaml; everything else → Raw. Authored
     /// content always has one of those three extensions (read::run filters);
     /// generator-emitted docs can have anything (e.g. `.xml`) and need the
-    /// Html (Tera-only, no Markdown render) treatment.
+    /// Raw (Tera-only, no Markdown render) treatment.
     pub fn kind(&self) -> DocKind {
-        match self.id_path.extension().and_then(|e| e.to_str()) {
-            Some("md") => DocKind::Markdown,
-            Some("yaml") => DocKind::Yaml,
-            _ => DocKind::Html,
-        }
+        DocKind::from(self.id_path.as_path())
     }
 
     /// Read `content_dir.join(id_path)` from disk, parse it, and apply the
@@ -118,12 +126,11 @@ impl Doc {
             .with_context(|| format!("could not read {}", fs_path.display()))?;
         let meta = fs::metadata(&fs_path)
             .with_context(|| format!("could not stat {}", fs_path.display()))?;
-        let parsed = match id_path.extension().and_then(|e| e.to_str()) {
-            Some("yaml") => Doc::parse_yaml(id_path.to_path_buf(), &source),
+        let parsed = match DocKind::from(id_path) {
+            DocKind::Yaml => Doc::parse_yaml(id_path.to_path_buf(), &source),
             _ => Doc::parse(id_path.to_path_buf(), &source),
         };
-        let mut doc =
-            parsed.with_context(|| format!("could not parse {}", fs_path.display()))?;
+        let mut doc = parsed.with_context(|| format!("could not parse {}", fs_path.display()))?;
 
         let date_from_fs = parse_date(doc.data.get("date")).is_none();
         if date_from_fs {
@@ -305,12 +312,12 @@ mod tests {
         let xml = Doc::new(PathBuf::from("p.xml"), String::new(), Mapping::new());
         let extless = Doc::new(PathBuf::from("p"), String::new(), Mapping::new());
         assert_eq!(md.kind(), DocKind::Markdown);
-        assert_eq!(html.kind(), DocKind::Html);
+        assert_eq!(html.kind(), DocKind::Raw);
         assert_eq!(yaml.kind(), DocKind::Yaml);
-        // Unknown / extensionless default to Html so generator-emitted docs
+        // Unknown / extensionless default to Raw so generator-emitted docs
         // (e.g. sitemap.xml) bypass the Markdown render.
-        assert_eq!(xml.kind(), DocKind::Html);
-        assert_eq!(extless.kind(), DocKind::Html);
+        assert_eq!(xml.kind(), DocKind::Raw);
+        assert_eq!(extless.kind(), DocKind::Raw);
     }
 
     #[test]

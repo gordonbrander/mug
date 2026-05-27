@@ -11,6 +11,7 @@ pub mod permalink;
 pub mod query;
 pub mod read;
 pub mod scaffold;
+pub mod serve;
 pub mod site_data;
 pub mod static_copy;
 pub mod template;
@@ -30,6 +31,10 @@ pub fn new(path: &Path) -> Result<()> {
 
 pub fn watch() -> Result<()> {
     watch::run()
+}
+
+pub fn serve(host: std::net::IpAddr, port: u16) -> Result<()> {
+    serve::run(host, port)
 }
 
 pub fn build() -> Result<()> {
