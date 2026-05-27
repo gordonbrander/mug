@@ -1,6 +1,6 @@
 use crate::backlinks;
 use crate::config::Config;
-use crate::doc::Doc;
+use crate::doc::{Doc, DocMeta};
 use crate::html;
 use crate::permalink;
 use crate::query;
@@ -25,7 +25,7 @@ pub struct MarkupEnv {
 /// because the index is not yet meaningful at body-render time (spec §11).
 /// The `permalink` filter is a 1:1 lookup, not an index listing, so it ships
 /// on both envs (Phase 9).
-pub fn build_markup_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<MarkupEnv> {
+pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<MarkupEnv> {
     let mut tera = load_templates(config)?;
     register_url_filters(&mut tera, docs, config.site_url.clone(), config.base_path.clone());
     register_text_filters(&mut tera);
@@ -44,7 +44,16 @@ pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> 
     let mut env = load_templates(config)?;
     query::register(&mut env, docs.clone());
     backlinks::register(&mut env, docs.clone());
-    register_url_filters(&mut env, docs, config.site_url.clone(), config.base_path.clone());
+    // URL filters only ever read `id_path`/`output_path` — project to the
+    // narrower `DocMeta` view to share one filter implementation with the
+    // markup env.
+    let url_docs: Arc<Vec<DocMeta>> = Arc::new(docs.iter().map(DocMeta::from).collect());
+    register_url_filters(
+        &mut env,
+        url_docs,
+        config.site_url.clone(),
+        config.base_path.clone(),
+    );
     register_text_filters(&mut env);
     Ok(env)
 }
@@ -65,7 +74,7 @@ pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> 
 /// not crossed.
 fn register_url_filters(
     env: &mut Tera,
-    docs: Arc<Vec<Doc>>,
+    docs: Arc<Vec<DocMeta>>,
     site_url: Option<String>,
     base_path: String,
 ) {
@@ -156,7 +165,7 @@ fn register_text_filters(env: &mut Tera) {
 }
 
 fn lookup_doc_url(
-    docs: &[Doc],
+    docs: &[DocMeta],
     value: &Value,
     filter_name: &str,
 ) -> tera::Result<String> {
@@ -244,17 +253,21 @@ mod tests {
         Arc::new(Vec::new())
     }
 
+    fn empty_meta_snapshot() -> Arc<Vec<DocMeta>> {
+        Arc::new(Vec::new())
+    }
+
     #[test]
     fn markup_env_does_not_register_query() {
         // Guards spec §11: `query` must never be callable from the markup env.
-        let mut env = build_markup_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let ctx = tera::Context::new();
         assert!(env.tera.render_str("{{ query() }}", &ctx).is_err());
     }
 
     #[test]
     fn markup_env_does_not_register_backlinks() {
-        let mut env = build_markup_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let ctx = tera::Context::new();
         assert!(env.tera.render_str("{{ backlinks() }}", &ctx).is_err());
     }
@@ -262,7 +275,7 @@ mod tests {
     #[test]
     fn markup_env_does_not_register_backlinks_as_filter() {
         // Spec §11: even the filter form must fail on the markup env.
-        let mut env = build_markup_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let ctx = tera::Context::new();
         assert!(env.tera.render_str("{{ 'a.md' | backlinks }}", &ctx).is_err());
     }
@@ -270,7 +283,7 @@ mod tests {
     #[test]
     fn missing_templates_dir_is_not_an_error() {
         // Fixtures 01 and 02 have no templates/ dir; the env must still build.
-        let env = build_markup_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         assert!(env.macro_preamble.is_empty());
         assert!(build_template_env(&cfg_without_templates(), empty_snapshot()).is_ok());
     }
@@ -305,10 +318,14 @@ mod tests {
         Arc::new(vec![d])
     }
 
+    fn one_doc_meta_snapshot() -> Arc<Vec<DocMeta>> {
+        Arc::new(one_doc_snapshot().iter().map(DocMeta::from).collect())
+    }
+
     #[test]
     fn markup_env_registers_permalink() {
         let mut env =
-            build_markup_env(&cfg_without_templates(), one_doc_snapshot()).unwrap();
+            build_markup_env(&cfg_without_templates(), one_doc_meta_snapshot()).unwrap();
         let out = env
             .tera
             .render_str(
@@ -335,7 +352,7 @@ mod tests {
     #[test]
     fn permalink_filter_errors_on_unknown_id_path() {
         let mut env =
-            build_markup_env(&cfg_without_templates(), one_doc_snapshot()).unwrap();
+            build_markup_env(&cfg_without_templates(), one_doc_meta_snapshot()).unwrap();
         let res = env
             .tera
             .render_str("{{ 'missing.md' | permalink }}", &tera::Context::new());
@@ -470,7 +487,7 @@ mod tests {
     fn markup_env_registers_all_four_url_filters() {
         let mut env = build_markup_env(
             &cfg_with_urls(Some("https://example.com"), "/blog"),
-            one_doc_snapshot(),
+            one_doc_meta_snapshot(),
         )
         .unwrap();
         for body in [
@@ -526,7 +543,7 @@ mod tests {
             "youtube.html",
             "{% macro embed(id) %}<iframe src=\"https://youtube.com/embed/{{ id }}\"></iframe>{% endmacro embed %}",
         );
-        let mut env = build_markup_env(&tmp.cfg(), empty_snapshot()).unwrap();
+        let mut env = build_markup_env(&tmp.cfg(), empty_meta_snapshot()).unwrap();
         // `markup::render` prepends the preamble before calling render_str; do
         // the same here so this test exercises the end-to-end contract.
         let body = format!(
@@ -544,7 +561,7 @@ mod tests {
     fn markup_env_handles_missing_macros_dir() {
         let tmp = TempTemplatesDir::new("no-macros");
         // templates/ exists, templates/macros/ does not.
-        let env = build_markup_env(&tmp.cfg(), empty_snapshot()).unwrap();
+        let env = build_markup_env(&tmp.cfg(), empty_meta_snapshot()).unwrap();
         assert!(env.macro_preamble.is_empty());
     }
 
@@ -552,7 +569,7 @@ mod tests {
     fn markup_env_handles_empty_macros_dir() {
         let tmp = TempTemplatesDir::new("empty-macros");
         std::fs::create_dir_all(tmp.0.join("macros")).unwrap();
-        let env = build_markup_env(&tmp.cfg(), empty_snapshot()).unwrap();
+        let env = build_markup_env(&tmp.cfg(), empty_meta_snapshot()).unwrap();
         assert!(env.macro_preamble.is_empty());
     }
 
@@ -562,7 +579,7 @@ mod tests {
         // Write in reverse order to prove sort is by stem, not FS read order.
         tmp.write_macros_file("twitter.html", "{% macro x() %}t{% endmacro x %}");
         tmp.write_macros_file("aside.html", "{% macro x() %}a{% endmacro x %}");
-        let env = build_markup_env(&tmp.cfg(), empty_snapshot()).unwrap();
+        let env = build_markup_env(&tmp.cfg(), empty_meta_snapshot()).unwrap();
         assert_eq!(
             env.macro_preamble,
             "{% import \"macros/aside.html\" as aside %}\n\
@@ -575,7 +592,7 @@ mod tests {
         let tmp = TempTemplatesDir::new("non-html");
         tmp.write_macros_file("notes.md", "not a macro");
         tmp.write_macros_file("real.html", "{% macro hi() %}hi{% endmacro hi %}");
-        let env = build_markup_env(&tmp.cfg(), empty_snapshot()).unwrap();
+        let env = build_markup_env(&tmp.cfg(), empty_meta_snapshot()).unwrap();
         assert_eq!(
             env.macro_preamble,
             "{% import \"macros/real.html\" as real %}\n"
@@ -584,7 +601,7 @@ mod tests {
 
     #[test]
     fn truncate_words_filter_on_markup_env() {
-        let mut env = build_markup_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let out = env
             .tera
             .render_str(

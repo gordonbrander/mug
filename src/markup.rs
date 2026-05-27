@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::doc::{Doc, DocKind};
+use crate::doc::{Doc, DocKind, DocMeta};
 use crate::html as html_utils;
 use crate::index::Index;
 use crate::site_data::SiteData;
@@ -21,7 +21,7 @@ pub fn render(
     env: &mut MarkupEnv,
     site_data: &SiteData,
     doc: &mut Doc,
-    snapshot: &Arc<Vec<Doc>>,
+    snapshot: &[DocMeta],
 ) -> Result<()> {
     let mut ctx = tera::Context::new();
     ctx.insert("doc", &*doc);
@@ -52,7 +52,7 @@ pub fn render(
     // Markdown docs only (spec §8). Resolution targets are read from
     // `snapshot` (frozen index view).
     let after_wikilinks = if doc.kind() == DocKind::Markdown {
-        let (expanded, outlinks) = wikilink::expand(&rendered, doc, snapshot.as_slice());
+        let (expanded, outlinks) = wikilink::expand(&rendered, doc, snapshot);
         doc.outlinks = outlinks;
         expanded
     } else {
@@ -102,7 +102,7 @@ mod tests {
     }
 
     fn render_doc(doc: &mut Doc) {
-        let snapshot: Arc<Vec<Doc>> = Arc::new(Vec::new());
+        let snapshot: Arc<Vec<DocMeta>> = Arc::new(Vec::new());
         let mut env = build_markup_env(&cfg(), snapshot.clone()).unwrap();
         render(&mut env, &site_data(), doc, &snapshot).unwrap();
     }
@@ -172,11 +172,12 @@ mod tests {
 }
 
 pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
-    // Snapshot the index for wikilink resolution and the `permalink` filter.
-    // `id_path` and `output_path` are final by the end of `read::run`; the
-    // snapshot's stale `content`/`outlinks` are unobserved (see plan §
-    // "Index lifecycle").
-    let snapshot = Arc::new(index.docs.clone());
+    // Frozen `DocMeta` view of the index for wikilink resolution and the
+    // URL filters. The projection drops `content`/`outlinks`/`data`/
+    // `template`, so the type system enforces that the markup phase can't
+    // read another doc's body or stale markup-phase state.
+    let snapshot: Arc<Vec<DocMeta>> =
+        Arc::new(index.docs.iter().map(DocMeta::from).collect());
     let mut env = build_markup_env(config, snapshot.clone())?;
     for doc in &mut index.docs {
         render(&mut env, site_data, doc, &snapshot)?;

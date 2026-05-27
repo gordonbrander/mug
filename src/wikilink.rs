@@ -1,4 +1,4 @@
-use crate::doc::Doc;
+use crate::doc::{Doc, DocMeta};
 use crate::html;
 use crate::permalink;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 /// Spec §8: resolution sluggifies the target and walks the source doc's
 /// parent chain (current dir, then upward) looking for a stem-slug match.
 /// First match wins.
-pub fn expand(body: &str, source: &Doc, docs: &[Doc]) -> (String, Vec<PathBuf>) {
+pub fn expand(body: &str, source: &Doc, docs: &[DocMeta]) -> (String, Vec<PathBuf>) {
     let mut out = String::with_capacity(body.len());
     let mut outlinks: Vec<PathBuf> = Vec::new();
     let mut rest = body;
@@ -96,7 +96,7 @@ fn split_target_display(inside: &str) -> (&str, &str) {
 /// Resolve a wikilink target to a doc, per spec §8: sluggify the target,
 /// walk the source doc's parent chain (current dir first, then upward to
 /// root), and return the first doc whose stem-slug matches.
-fn resolve<'a>(target: &str, source_id_path: &Path, docs: &'a [Doc]) -> Option<&'a Doc> {
+fn resolve<'a>(target: &str, source_id_path: &Path, docs: &'a [DocMeta]) -> Option<&'a DocMeta> {
     let target_slug = slug::slugify(target);
     if target_slug.is_empty() {
         return None;
@@ -129,24 +129,28 @@ fn resolve<'a>(target: &str, source_id_path: &Path, docs: &'a [Doc]) -> Option<&
 mod tests {
     use super::*;
 
-    fn doc_at(id_path: &str) -> Doc {
+    fn source_doc(id_path: &str) -> Doc {
         let mut d = Doc::default();
         d.id_path = PathBuf::from(id_path);
         d.output_path = PathBuf::from(id_path).with_extension("html");
         d
     }
 
-    fn doc_with_permalink(id_path: &str, output_path: &str) -> Doc {
+    fn doc_at(id_path: &str) -> DocMeta {
+        DocMeta::from(&source_doc(id_path))
+    }
+
+    fn doc_with_permalink(id_path: &str, output_path: &str) -> DocMeta {
         let mut d = Doc::default();
         d.id_path = PathBuf::from(id_path);
         d.output_path = PathBuf::from(output_path);
-        d
+        DocMeta::from(&d)
     }
 
     #[test]
     fn expand_resolves_same_dir() {
-        let source = doc_at("blog/a.md");
-        let docs = vec![source.clone(), doc_at("blog/b.md")];
+        let source = source_doc("blog/a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("blog/b.md")];
         let (out, outlinks) = expand("see [[b]]", &source, &docs);
         assert_eq!(out, r#"see <a class="wikilink" href="/blog/b.html">b</a>"#);
         assert_eq!(outlinks, vec![PathBuf::from("blog/b.md")]);
@@ -154,8 +158,8 @@ mod tests {
 
     #[test]
     fn expand_walks_to_parent() {
-        let source = doc_at("blog/2025/deep.md");
-        let docs = vec![source.clone(), doc_at("hello.md")];
+        let source = source_doc("blog/2025/deep.md");
+        let docs = vec![DocMeta::from(&source), doc_at("hello.md")];
         let (out, outlinks) = expand("see [[hello]]", &source, &docs);
         assert!(out.contains(r#"href="/hello.html""#));
         assert_eq!(outlinks, vec![PathBuf::from("hello.md")]);
@@ -163,16 +167,16 @@ mod tests {
 
     #[test]
     fn expand_walks_multiple_levels() {
-        let source = doc_at("a/b/c/d.md");
-        let docs = vec![source.clone(), doc_at("top.md")];
+        let source = source_doc("a/b/c/d.md");
+        let docs = vec![DocMeta::from(&source), doc_at("top.md")];
         let (out, _) = expand("[[top]]", &source, &docs);
         assert!(out.contains(r#"href="/top.html""#));
     }
 
     #[test]
     fn expand_uses_display_text() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone(), doc_at("b.md")];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("b.md")];
         let (out, _) = expand("[[b|click here]]", &source, &docs);
         assert_eq!(
             out,
@@ -182,8 +186,8 @@ mod tests {
 
     #[test]
     fn expand_unresolved_emits_nolink_span() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone()];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source)];
         let (out, outlinks) = expand("[[Missing]]", &source, &docs);
         assert_eq!(out, r#"<span class="nolink">Missing</span>"#);
         assert!(outlinks.is_empty());
@@ -191,8 +195,8 @@ mod tests {
 
     #[test]
     fn expand_records_outlinks() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone(), doc_at("b.md"), doc_at("c.md")];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("b.md"), doc_at("c.md")];
         let (_, outlinks) = expand("[[b]] and [[c]]", &source, &docs);
         assert_eq!(
             outlinks,
@@ -202,16 +206,16 @@ mod tests {
 
     #[test]
     fn expand_dedups_outlinks() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone(), doc_at("b.md")];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("b.md")];
         let (_, outlinks) = expand("[[b]] [[b]] [[b|again]]", &source, &docs);
         assert_eq!(outlinks, vec![PathBuf::from("b.md")]);
     }
 
     #[test]
     fn expand_escapes_html_in_display() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone(), doc_at("b.md")];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("b.md")];
         let (out, _) = expand("[[b|<script>]]", &source, &docs);
         assert!(out.contains("&lt;script&gt;"));
         assert!(!out.contains("<script>"));
@@ -219,16 +223,16 @@ mod tests {
 
     #[test]
     fn expand_ignores_newline_in_brackets() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone(), doc_at("b.md")];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("b.md")];
         let (out, _) = expand("[[b\nfoo]]", &source, &docs);
         assert_eq!(out, "[[b\nfoo]]");
     }
 
     #[test]
     fn expand_ignores_nested_open_bracket() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone(), doc_at("b.md")];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source), doc_at("b.md")];
         let (out, _) = expand("[[[b]]", &source, &docs);
         // First `[[` aborts (sees `[` inside); next scan starts at `[b]]` which has no `[[`.
         assert_eq!(out, "[[[b]]");
@@ -236,16 +240,16 @@ mod tests {
 
     #[test]
     fn expand_handles_unmatched_open() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone()];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source)];
         let (out, _) = expand("text [[ no close", &source, &docs);
         assert_eq!(out, "text [[ no close");
     }
 
     #[test]
     fn expand_passes_through_no_wikilinks() {
-        let source = doc_at("a.md");
-        let docs = vec![source.clone()];
+        let source = source_doc("a.md");
+        let docs = vec![DocMeta::from(&source)];
         let (out, outlinks) = expand("plain markdown text", &source, &docs);
         assert_eq!(out, "plain markdown text");
         assert!(outlinks.is_empty());
@@ -283,9 +287,9 @@ mod tests {
     fn expand_uses_to_url_for_index_html_dirs() {
         // A doc with a permalink-style output_path (trailing /index.html) should
         // render as a dir URL via to_url.
-        let source = doc_at("a.md");
+        let source = source_doc("a.md");
         let docs = vec![
-            source.clone(),
+            DocMeta::from(&source),
             doc_with_permalink("b.md", "blog/b/index.html"),
         ];
         let (out, _) = expand("[[b]]", &source, &docs);

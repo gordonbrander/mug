@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::doc::Doc;
+use crate::doc::{Doc, DocMeta};
 use crate::generator::{Generator, Pagination};
 use crate::index::Index;
 use crate::markup;
@@ -45,9 +45,10 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
     // emitted by earlier generators (spec §9.1).
     generators.sort_by_key(|g| g.weight);
 
-    // Snapshot the (post-authored-markup) index for wikilink resolution and
-    // the `permalink` filter in generator bodies.
-    let snapshot = Arc::new(index.docs.clone());
+    // Frozen `DocMeta` view of the post-authored-markup index for wikilink
+    // resolution and the URL filters inside generator bodies.
+    let snapshot: Arc<Vec<DocMeta>> =
+        Arc::new(index.docs.iter().map(DocMeta::from).collect());
     let mut markup_env = build_markup_env(config, snapshot.clone())?;
 
     for g in generators {

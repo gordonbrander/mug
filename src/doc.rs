@@ -22,6 +22,38 @@ pub struct Doc {
     pub outlinks: Vec<PathBuf>,
 }
 
+/// Read-only projection of `Doc` used as the frozen index view during the
+/// markup phase. Omits `content` (mutated by `markup::render`), `outlinks`
+/// (populated by `markup::render`), `data` (raw frontmatter — uplifted fields
+/// cover the typical uses), and `template` (a per-doc instruction, not
+/// cross-doc metadata). The type system then enforces that wikilink
+/// resolution and URL filters cannot read another doc's body or stale
+/// markup-phase state.
+#[derive(Clone, Serialize)]
+pub struct DocMeta {
+    pub id_path: PathBuf,
+    pub output_path: PathBuf,
+    pub title: String,
+    pub summary: String,
+    pub tags: Vec<String>,
+    pub date: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
+}
+
+impl From<&Doc> for DocMeta {
+    fn from(doc: &Doc) -> DocMeta {
+        DocMeta {
+            id_path: doc.id_path.clone(),
+            output_path: doc.output_path.clone(),
+            title: doc.title.clone(),
+            summary: doc.summary.clone(),
+            tags: doc.tags.clone(),
+            date: doc.date,
+            updated: doc.updated,
+        }
+    }
+}
+
 /// Derived from `id_path` extension at dispatch time — there is no `kind`
 /// field on `Doc` to keep in sync. `read::run` filters authored content to
 /// `md|html|yaml`. The default arm is `Raw` so generator-emitted docs
