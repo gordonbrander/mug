@@ -36,7 +36,7 @@ const LIVERELOAD_TAG: &str = "<script src=\"/__livereload.js\"></script>";
 type ServeBody = UnsyncBoxBody<Bytes, io::Error>;
 
 pub fn run(host: IpAddr, port: u16) -> Result<()> {
-    crate::build().context("initial build")?;
+    crate::build::run().context("initial build")?;
 
     let (config, _) = Config::load(Path::new("config.yaml"))?;
     let output_dir = config.output_dir.clone();
@@ -50,7 +50,7 @@ pub fn run(host: IpAddr, port: u16) -> Result<()> {
 
     let reload_tx_watcher = reload_tx.clone();
     std::thread::spawn(move || {
-        let result = crate::watch::watch_loop(|build_result| {
+        let result = crate::command::watch::watch_loop(|build_result| {
             if build_result.is_ok() {
                 let _ = reload_tx_watcher.send(());
             }

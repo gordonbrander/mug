@@ -1,10 +1,10 @@
+use crate::build::wikilink;
 use crate::config::Config;
 use crate::doc::{Doc, DocKind, DocMeta};
 use crate::html as html_utils;
 use crate::index::Index;
 use crate::site_data::SiteData;
 use crate::tera_env::{MarkupEnv, build_markup_env};
-use crate::wikilink;
 use anyhow::{Context, Result};
 use pulldown_cmark::{Parser, html};
 use std::borrow::Cow;

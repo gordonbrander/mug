@@ -5,25 +5,25 @@ use std::path::Path;
 /// Files written by `mug new <dir>`. Sourced from `scaffold/` at the crate
 /// root and embedded at compile time. Add a row here to ship a new file.
 const SCAFFOLD_FILES: &[(&str, &str)] = &[
-    ("config.yaml", include_str!("../scaffold/config.yaml")),
-    ("content/index.md", include_str!("../scaffold/content/index.md")),
+    ("config.yaml", include_str!("../../scaffold/config.yaml")),
+    ("content/index.md", include_str!("../../scaffold/content/index.md")),
     (
         "content/posts/hello.md",
-        include_str!("../scaffold/content/posts/hello.md"),
+        include_str!("../../scaffold/content/posts/hello.md"),
     ),
     (
         "templates/base.html",
-        include_str!("../scaffold/templates/base.html"),
+        include_str!("../../scaffold/templates/base.html"),
     ),
     (
         "generators/rss.xml",
-        include_str!("../scaffold/generators/rss.xml"),
+        include_str!("../../scaffold/generators/rss.xml"),
     ),
     (
         "generators/sitemap.xml",
-        include_str!("../scaffold/generators/sitemap.xml"),
+        include_str!("../../scaffold/generators/sitemap.xml"),
     ),
-    ("static/.gitkeep", include_str!("../scaffold/static/.gitkeep")),
+    ("static/.gitkeep", include_str!("../../scaffold/static/.gitkeep")),
 ];
 
 /// Scaffold a starter site into `target`. Errors if `target` already exists at

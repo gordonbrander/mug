@@ -1,15 +1,24 @@
-use crate::backlinks;
+//! Tera environments used by the markup and template phases. Each phase gets
+//! its own `Tera` with a curated filter/function set; the submodules under
+//! `tera_env/` hold the adapters that bridge pure domain logic (`query`,
+//! `backlinks`, `permalink`, `html`) to Tera's filter/function API.
+//!
+//! Spec §11: the markup env intentionally omits index-listing filters
+//! (`query`, `backlinks`) because the index is not yet meaningful at
+//! body-render time. URL filters and text filters ship on both envs — they
+//! are 1:1 lookups or string composition, not listings.
+
+mod backlinks;
+mod macros;
+mod query;
+mod text;
+mod url;
+
 use crate::config::Config;
 use crate::doc::{Doc, DocMeta};
-use crate::html;
-use crate::permalink;
-use crate::query;
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
-use tera::{Tera, Value};
+use tera::Tera;
 
 /// Markup-phase Tera env paired with the auto-import preamble for
 /// `templates/macros/*.html` (Phase 11). Markdown bodies can invoke macros as
@@ -23,23 +32,21 @@ pub struct MarkupEnv {
 /// Tera environment used by the markup phase. Intentionally restricted: no
 /// index-listing filters/functions (`query`, `backlinks`) are registered here,
 /// because the index is not yet meaningful at body-render time (spec §11).
-/// The `permalink` filter is a 1:1 lookup, not an index listing, so it ships
-/// on both envs (Phase 9).
 pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<MarkupEnv> {
     let mut tera = load_templates(config)?;
-    register_url_filters(&mut tera, docs, config.site_url.clone(), config.base_path.clone());
-    register_text_filters(&mut tera);
-    let macro_preamble = discover_macro_imports(config);
+    url::register(&mut tera, docs, config.site_url.clone(), config.base_path.clone());
+    text::register(&mut tera);
+    let macro_preamble = macros::discover_imports(config);
     Ok(MarkupEnv {
         tera,
         macro_preamble,
     })
 }
 
-/// Tera environment used by the template phase. The full filter set lands here
-/// over phases 7, 9, 10. `docs` is a frozen snapshot of the index taken at the
-/// start of the template phase — closures registered here borrow from it for
-/// the rest of the build.
+/// Tera environment used by the template phase. The full filter set lands
+/// here. `docs` is a frozen snapshot of the index taken at the start of the
+/// template phase — closures registered here borrow from it for the rest of
+/// the build.
 pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> {
     let mut env = load_templates(config)?;
     query::register(&mut env, docs.clone());
@@ -48,141 +55,14 @@ pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> 
     // narrower `DocMeta` view to share one filter implementation with the
     // markup env.
     let url_docs: Arc<Vec<DocMeta>> = Arc::new(docs.iter().map(DocMeta::from).collect());
-    register_url_filters(
+    url::register(
         &mut env,
         url_docs,
         config.site_url.clone(),
         config.base_path.clone(),
     );
-    register_text_filters(&mut env);
+    text::register(&mut env);
     Ok(env)
-}
-
-/// Register the Jekyll-inspired URL filter set on `env`:
-///
-/// - `permalink` — `id_path` → absolute URL (`site_url + base_path + doc_url`).
-///   Falls back to root-relative output when `site_url` is `None`.
-/// - `link` — `id_path` → root-relative URL (`base_path + doc_url`).
-/// - `relative_url` — arbitrary relative path → `base_path + "/" + path`.
-/// - `absolute_url` — arbitrary relative path → `site_url + base_path + "/" + path`.
-///   Falls back to root-relative when `site_url` is `None`.
-///
-/// `permalink` and `link` look up the doc in the snapshot; `relative_url` and
-/// `absolute_url` just prepend prefixes. All four are registered on both the
-/// markup and template envs — they are 1:1 lookups or string composition, not
-/// index listings, so spec §11's "no index-backed filters in markup" line is
-/// not crossed.
-fn register_url_filters(
-    env: &mut Tera,
-    docs: Arc<Vec<DocMeta>>,
-    site_url: Option<String>,
-    base_path: String,
-) {
-    // permalink: id_path -> absolute (site_url + base_path + url)
-    let docs_p = docs.clone();
-    let site_p = site_url.clone();
-    let base_p = base_path.clone();
-    env.register_filter(
-        "permalink",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let url = lookup_doc_url(&docs_p, value, "permalink")?;
-            let out = format!(
-                "{}{}{}",
-                site_p.as_deref().unwrap_or(""),
-                base_p,
-                url
-            );
-            tera::to_value(out).map_err(tera::Error::from)
-        },
-    );
-
-    // link: id_path -> root-relative (base_path + url)
-    let docs_l = docs;
-    let base_l = base_path.clone();
-    env.register_filter(
-        "link",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let url = lookup_doc_url(&docs_l, value, "link")?;
-            let out = format!("{}{}", base_l, url);
-            tera::to_value(out).map_err(tera::Error::from)
-        },
-    );
-
-    // relative_url: path -> base_path + "/" + path
-    let base_r = base_path.clone();
-    env.register_filter(
-        "relative_url",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let p = value.as_str().ok_or_else(|| {
-                tera::Error::msg("relative_url filter: input must be a string")
-            })?;
-            let stripped = p.trim_start_matches('/');
-            let out = format!("{}/{}", base_r, stripped);
-            tera::to_value(out).map_err(tera::Error::from)
-        },
-    );
-
-    // absolute_url: path -> site_url + base_path + "/" + path
-    env.register_filter(
-        "absolute_url",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let p = value.as_str().ok_or_else(|| {
-                tera::Error::msg("absolute_url filter: input must be a string")
-            })?;
-            let stripped = p.trim_start_matches('/');
-            let out = format!(
-                "{}{}/{}",
-                site_url.as_deref().unwrap_or(""),
-                base_path,
-                stripped
-            );
-            tera::to_value(out).map_err(tera::Error::from)
-        },
-    );
-}
-
-/// Register general-purpose text-shaping filters on both envs.
-///
-/// - `truncate_words` — `text | truncate_words(length=N)`. Truncates at the
-///   last whitespace that fits, appending `…` when truncation happens. Default
-///   length is 250. Complements Tera's built-in `striptags`, which strips
-///   HTML, and `truncate`, which is not word-aware.
-fn register_text_filters(env: &mut Tera) {
-    env.register_filter(
-        "truncate_words",
-        |value: &Value, args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let text = value
-                .as_str()
-                .ok_or_else(|| tera::Error::msg("truncate_words filter: input must be a string"))?;
-            let length = args
-                .get("length")
-                .and_then(Value::as_u64)
-                .map(|n| n as usize)
-                .unwrap_or(250);
-            tera::to_value(html::truncate_words(text, length)).map_err(tera::Error::from)
-        },
-    );
-}
-
-fn lookup_doc_url(
-    docs: &[DocMeta],
-    value: &Value,
-    filter_name: &str,
-) -> tera::Result<String> {
-    let id_path_str = value.as_str().ok_or_else(|| {
-        tera::Error::msg(format!(
-            "{} filter: input must be a string id_path",
-            filter_name
-        ))
-    })?;
-    let target = PathBuf::from(id_path_str);
-    let doc = docs.iter().find(|d| d.id_path == target).ok_or_else(|| {
-        tera::Error::msg(format!(
-            "{} filter: no doc with id_path `{}`",
-            filter_name, id_path_str
-        ))
-    })?;
-    Ok(permalink::to_url(&doc.output_path))
 }
 
 fn load_templates(config: &Config) -> Result<Tera> {
@@ -191,41 +71,6 @@ fn load_templates(config: &Config) -> Result<Tera> {
     }
     let pattern = format!("{}/**/*.{{html,xml}}", config.templates_dir.display());
     Tera::new(&pattern).with_context(|| format!("loading templates from {}", pattern))
-}
-
-/// Scan `templates/macros/*.html` (non-recursive) and build a Tera import
-/// preamble: one `{% import "macros/<stem>.html" as <stem> %}` per macro file.
-/// Sorted alphabetically by stem so output is deterministic across platforms
-/// (the FS read order is not). Returns `""` if `templates/` or
-/// `templates/macros/` is missing, or the dir contains no `.html` files.
-fn discover_macro_imports(config: &Config) -> String {
-    let macros_dir = config.templates_dir.join("macros");
-    let Ok(entries) = fs::read_dir(&macros_dir) else {
-        return String::new();
-    };
-
-    let mut stems: Vec<String> = Vec::new();
-    for entry in entries.flatten() {
-        if !entry.file_type().is_ok_and(|t| t.is_file()) {
-            continue;
-        }
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("html") {
-            continue;
-        }
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            stems.push(stem.to_string());
-        }
-    }
-    stems.sort();
-
-    let mut out = String::new();
-    for stem in stems {
-        out.push_str(&format!(
-            "{{% import \"macros/{stem}.html\" as {stem} %}}\n"
-        ));
-    }
-    out
 }
 
 #[cfg(test)]

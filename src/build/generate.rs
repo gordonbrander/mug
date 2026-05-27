@@ -1,8 +1,8 @@
+use crate::build::generator::{Generator, Pagination};
+use crate::build::markup;
 use crate::config::Config;
 use crate::doc::{Doc, DocMeta};
-use crate::generator::{Generator, Pagination};
 use crate::index::Index;
-use crate::markup;
 use crate::permalink;
 use crate::query;
 use crate::site_data::SiteData;

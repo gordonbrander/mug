@@ -1,8 +1,8 @@
 //! Watch mode: rebuild on every change to a source path or `config.yaml`.
 //!
 //! Per spec §2, v1 is full-rebuild only — `watch` is a debounced loop around
-//! [`crate::build`]. Errors raised during a rebuild are logged and the watcher
-//! keeps running; only watcher-setup errors propagate out of [`run`].
+//! [`crate::build::run`]. Errors raised during a rebuild are logged and the
+//! watcher keeps running; only watcher-setup errors propagate out of [`run`].
 
 use crate::config::Config;
 use anyhow::Result;
@@ -67,7 +67,7 @@ where
 
 fn rebuild() -> Result<()> {
     let start = Instant::now();
-    let result = crate::build();
+    let result = crate::build::run();
     match &result {
         Ok(()) => eprintln!("rebuilt in {:?}", start.elapsed()),
         Err(e) => eprintln!("build failed: {e:#}"),
