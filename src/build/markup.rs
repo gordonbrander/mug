@@ -1,4 +1,4 @@
-mod wikilink;
+pub(crate) mod wikilink;
 
 use crate::config::Config;
 use crate::doc::{Doc, DocKind, DocMeta};
@@ -15,15 +15,10 @@ const SUMMARY_MAX_CHARS: usize = 250;
 /// Run the markup phase over `doc`. Renders the body string through the
 /// restricted Tera env, then for Markdown docs parses with comrak, resolves
 /// wikilinks on the AST (populating `doc.outlinks`), and renders to HTML.
-/// `snapshot` is the frozen index view used by `wikilink::resolve_in_ast` for
-/// target resolution. Exposed publicly so `generate::run` can apply the same
-/// transformation to its emitted docs.
-pub fn render(
-    env: &mut MarkupEnv,
-    site_data: &SiteData,
-    doc: &mut Doc,
-    snapshot: &[DocMeta],
-) -> Result<()> {
+/// Wikilink target resolution uses `env.stem_index`, the frozen stem→candidate
+/// grouping built when the env was constructed. Exposed publicly so
+/// `generate::run` can apply the same transformation to its emitted docs.
+pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Result<()> {
     let mut ctx = tera::Context::new();
     ctx.insert("doc", &*doc);
     ctx.insert("site", &site_data.site);
@@ -52,15 +47,15 @@ pub fn render(
     // Markdown bodies are parsed by comrak; wikilinks are resolved on the AST
     // (spec §8), so they are code-span aware — `[[…]]` inside a fence stays
     // literal. `rendered` (post-Tera) is parsed directly; Raw/Yaml bodies pass
-    // through untouched. `snapshot` is the frozen index view used by wikilink
-    // resolution.
+    // through untouched. `env.stem_index` is the frozen stem→candidate grouping
+    // used by wikilink resolution.
     doc.content = match doc.kind() {
         DocKind::Markdown => {
             let arena = comrak::Arena::new();
             let root = comrak::parse_document(&arena, &rendered, &env.options);
-            doc.outlinks = wikilink::resolve_in_ast(root, doc, snapshot);
+            doc.outlinks = wikilink::resolve_in_ast(root, doc, &env.stem_index);
             let mut plugins = comrak::options::Plugins::default();
-            plugins.render.codefence_syntax_highlighter = Some(&env.syntect);
+            plugins.render.codefence_syntax_highlighter = Some(env.syntect.as_ref());
             let mut out = String::new();
             comrak::format_html_with_plugins(root, &env.options, &mut out, &plugins)
                 .with_context(|| format!("comrak render in {}", doc.id_path.display()))?;
@@ -103,8 +98,8 @@ mod tests {
 
     fn render_doc(doc: &mut Doc) {
         let snapshot: Arc<Vec<DocMeta>> = Arc::new(Vec::new());
-        let mut env = build_markup_env(&cfg(), snapshot.clone()).unwrap();
-        render(&mut env, &site_data(), doc, &snapshot).unwrap();
+        let mut env = build_markup_env(&cfg(), snapshot).unwrap();
+        render(&mut env, &site_data(), doc).unwrap();
     }
 
     #[test]
@@ -180,7 +175,7 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
         Arc::new(index.docs.iter().map(DocMeta::from).collect());
     let mut env = build_markup_env(config, snapshot.clone())?;
     for doc in &mut index.docs {
-        render(&mut env, site_data, doc, &snapshot)?;
+        render(&mut env, site_data, doc)?;
     }
     Ok(())
 }
