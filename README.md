@@ -129,14 +129,14 @@ Iterate over the in-memory index. Available in **templates only**, not in
 document bodies.
 
 ```jinja
-{% for post in query(path="posts/*.md", order_by="created", sort="desc", limit=10) %}
+{% for post in query(path="posts/*.md", order_by="date", sort="desc", limit=10) %}
   <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
 {% endfor %}
 ```
 
-Kwargs: `path` (glob), `tag` (string), `order_by` (`title` | `created` |
+Kwargs: `path` (glob), `tag` (string), `order_by` (`title` | `date` |
 `updated`), `sort` (`asc` | `desc`), `limit` (integer). Default is
-`order_by=created, sort=desc`.
+`order_by=date, sort=desc`.
 
 ### `backlinks` — pages that link to this one
 
@@ -205,7 +205,7 @@ per_page: 10
 template: blog-layout.html
 query:
   path: posts/*.md
-  order_by: created
+  order_by: date
   sort: desc
 ---
 {% for post in pagination.items %}

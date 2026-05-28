@@ -100,7 +100,7 @@ permalink: /blog/page-:page/\n\
 per_page: 2\n\
 weight: 5\n\
 template: blog.html\n\
-query:\n  path: \"posts/*.md\"\n  order_by: created\n  sort: desc\n\
+query:\n  path: \"posts/*.md\"\n  order_by: date\n  sort: desc\n\
 ---\nBODY";
         let g = Generator::parse(PathBuf::from("blog.html"), source).unwrap();
         assert_eq!(g.permalink, "/blog/page-:page/");

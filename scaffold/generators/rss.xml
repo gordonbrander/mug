@@ -3,7 +3,7 @@ permalink: /feed.xml
 weight: 100
 query:
   path: "posts/*.md"
-  order_by: created
+  order_by: date
   sort: desc
   limit: 20
 ---

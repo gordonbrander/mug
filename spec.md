@@ -210,7 +210,7 @@ Since Wikilink syntax is not part of Markdown, the renderer won't touch it.
 **Backlink indexing:** every resolved wikilink records an edge in the index, so
 the reverse direction (which pages link *to* this one) is queryable. A
 **`backlinks` filter** exposes this during the template phase, with ordering by
-`title`, `created`, or `updated`.
+`title`, `date`, or `updated`.
 
 ---
 
@@ -223,7 +223,7 @@ Capabilities:
 
 - **Filter by path** — prefix or, preferably, **glob** (`pages/*.md`).
 - **Filter by tag.**
-- **Order by** `title`, `created`, or `updated`, with sort direction.
+- **Order by** `title`, `date`, or `updated`, with sort direction.
 
 **Optional compact query language** (under consideration):
 

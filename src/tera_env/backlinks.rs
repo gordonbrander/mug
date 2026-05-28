@@ -50,11 +50,11 @@ fn from_kwargs(args: &HashMap<String, Value>) -> tera::Result<Backlinks> {
             .ok_or_else(|| tera::Error::msg("backlinks: `order_by` must be a string"))?;
         b.order_by = match s {
             "title" => OrderKey::Title,
-            "created" => OrderKey::Created,
+            "date" => OrderKey::Date,
             "updated" => OrderKey::Updated,
             other => {
                 return Err(tera::Error::msg(format!(
-                    "backlinks: `order_by` must be one of title|created|updated (got `{}`)",
+                    "backlinks: `order_by` must be one of title|date|updated (got `{}`)",
                     other
                 )));
             }
@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn from_kwargs_empty_is_default() {
         let b = from_kwargs(&HashMap::new()).unwrap();
-        assert_eq!(b.order_by, OrderKey::Created);
+        assert_eq!(b.order_by, OrderKey::Date);
         assert_eq!(b.sort, SortDir::Desc);
     }
 

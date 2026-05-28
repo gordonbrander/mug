@@ -10,7 +10,7 @@ pub struct Backlinks {
 impl Default for Backlinks {
     fn default() -> Self {
         Self {
-            order_by: OrderKey::Created,
+            order_by: OrderKey::Date,
             sort: SortDir::Desc,
         }
     }
@@ -28,7 +28,7 @@ pub fn list_backlinks<'a>(docs: &'a [Doc], target: &Path, b: &Backlinks) -> Vec<
     results.sort_by(|a, b2| {
         let cmp = match b.order_by {
             OrderKey::Title => a.title.cmp(&b2.title),
-            OrderKey::Created => a.date.cmp(&b2.date),
+            OrderKey::Date => a.date.cmp(&b2.date),
             OrderKey::Updated => a.updated.cmp(&b2.updated),
         };
         match b.sort {
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn list_backlinks_default_order_is_created_desc() {
+    fn list_backlinks_default_order_is_date_desc() {
         let docs = vec![
             doc("a.md", "A", "2025-01-01", &["target.md"]),
             doc("b.md", "B", "2025-02-01", &["target.md"]),

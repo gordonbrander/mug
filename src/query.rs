@@ -6,7 +6,7 @@ use serde_yaml_ng::{Mapping, Value as YamlValue};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderKey {
     Title,
-    Created,
+    Date,
     Updated,
 }
 
@@ -29,7 +29,7 @@ impl Default for Query {
         Self {
             path: None,
             tag: None,
-            order_by: OrderKey::Created,
+            order_by: OrderKey::Date,
             sort: SortDir::Desc,
             limit: None,
         }
@@ -87,11 +87,11 @@ impl Query {
                 .ok_or_else(|| anyhow!("query: `order_by` must be a string"))?;
             q.order_by = match s {
                 "title" => OrderKey::Title,
-                "created" => OrderKey::Created,
+                "date" => OrderKey::Date,
                 "updated" => OrderKey::Updated,
                 other => {
                     return Err(anyhow!(
-                        "query: `order_by` must be one of title|created|updated (got `{}`)",
+                        "query: `order_by` must be one of title|date|updated (got `{}`)",
                         other
                     ));
                 }
@@ -154,7 +154,7 @@ pub fn evaluate<'a>(q: &Query, docs: &'a [Doc]) -> Vec<&'a Doc> {
     results.sort_by(|a, b| {
         let cmp = match q.order_by {
             OrderKey::Title => a.title.cmp(&b.title),
-            OrderKey::Created => a.date.cmp(&b.date),
+            OrderKey::Date => a.date.cmp(&b.date),
             OrderKey::Updated => a.updated.cmp(&b.updated),
         };
         match q.sort {
@@ -202,7 +202,7 @@ mod tests {
         let q = Query::from_yaml_mapping(&Mapping::new()).unwrap();
         assert!(q.path.is_none());
         assert!(q.tag.is_none());
-        assert_eq!(q.order_by, OrderKey::Created);
+        assert_eq!(q.order_by, OrderKey::Date);
         assert_eq!(q.sort, SortDir::Desc);
         assert!(q.limit.is_none());
     }
@@ -253,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_default_order_is_created_desc() {
+    fn evaluate_default_order_is_date_desc() {
         let docs = vec![
             doc("a.md", "A", "2025-01-01"),
             doc("b.md", "B", "2025-02-01"),

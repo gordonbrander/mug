@@ -57,11 +57,11 @@ fn from_kwargs(args: &HashMap<String, Value>) -> tera::Result<Query> {
             .ok_or_else(|| tera::Error::msg("query: `order_by` must be a string"))?;
         q.order_by = match s {
             "title" => OrderKey::Title,
-            "created" => OrderKey::Created,
+            "date" => OrderKey::Date,
             "updated" => OrderKey::Updated,
             other => {
                 return Err(tera::Error::msg(format!(
-                    "query: `order_by` must be one of title|created|updated (got `{}`)",
+                    "query: `order_by` must be one of title|date|updated (got `{}`)",
                     other
                 )));
             }
@@ -107,7 +107,7 @@ mod tests {
         let q = from_kwargs(&HashMap::new()).unwrap();
         assert!(q.path.is_none());
         assert!(q.tag.is_none());
-        assert_eq!(q.order_by, OrderKey::Created);
+        assert_eq!(q.order_by, OrderKey::Date);
         assert_eq!(q.sort, SortDir::Desc);
         assert!(q.limit.is_none());
     }
