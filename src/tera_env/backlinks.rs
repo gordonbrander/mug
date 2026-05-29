@@ -14,7 +14,7 @@ const KNOWN_KEYS: &[&str] = &["order_by", "sort", "omit"];
 /// Register `backlinks` as a Tera filter on `env`. Usage:
 /// `{{ doc.id_path | backlinks(order_by="title", sort="asc") }}`. The piped
 /// value is the target doc's `id_path`; returns a list of docs whose
-/// `outlinks` contain it. Template-env only — spec §11 forbids index-listing
+/// `links` contain it. Template-env only — spec §11 forbids index-listing
 /// filters in the markup env.
 pub fn register(env: &mut Tera, docs: Arc<Vec<Doc>>) {
     env.register_filter(

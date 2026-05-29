@@ -19,7 +19,7 @@ impl Default for Backlinks {
     }
 }
 
-/// Linear scan over `docs`: collect any whose `outlinks` contain `target`,
+/// Linear scan over `docs`: collect any whose `links` contain `target`,
 /// then sort. No persistent inverted graph — the spec §11 "fully populated
 /// before listing" invariant is what makes this correct.
 pub fn list_backlinks<'a>(docs: &'a [Doc], target: &Path, b: &Backlinks) -> Vec<&'a Doc> {
@@ -27,7 +27,7 @@ pub fn list_backlinks<'a>(docs: &'a [Doc], target: &Path, b: &Backlinks) -> Vec<
 
     let mut results: Vec<&Doc> = docs
         .iter()
-        .filter(|d| !omit.contains(d.id_path.as_path()) && d.outlinks.iter().any(|o| o == target))
+        .filter(|d| !omit.contains(d.id_path.as_path()) && d.links.iter().any(|o| o == target))
         .collect();
 
     results.sort_by(|a, b2| {
@@ -59,13 +59,13 @@ mod tests {
             .and_utc()
     }
 
-    fn doc(id_path: &str, title: &str, date: &str, outlinks: &[&str]) -> Doc {
+    fn doc(id_path: &str, title: &str, date: &str, links: &[&str]) -> Doc {
         let mut d = Doc::default();
         d.id_path = PathBuf::from(id_path);
         d.title = title.to_string();
         d.date = at(date);
         d.updated = at(date);
-        d.outlinks = outlinks.iter().map(PathBuf::from).collect();
+        d.links = links.iter().map(PathBuf::from).collect();
         d
     }
 
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn list_backlinks_does_not_include_self_unless_self_outlinks() {
+    fn list_backlinks_does_not_include_self_unless_self_links() {
         // Source linking to itself should still appear in its own backlinks.
         let docs = vec![doc("a.md", "A", "2025-01-01", &["a.md"])];
         let b = Backlinks::default();

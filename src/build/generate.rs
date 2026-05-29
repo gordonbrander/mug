@@ -118,7 +118,7 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
                 date: epoch(),
                 updated: epoch(),
                 data,
-                outlinks: Vec::new(),
+                links: Vec::new(),
             };
 
             markup::render(&mut markup_env, site_data, &mut doc)?;

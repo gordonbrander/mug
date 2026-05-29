@@ -20,11 +20,11 @@ pub struct Doc {
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     pub data: Mapping,
-    pub outlinks: Vec<PathBuf>,
+    pub links: Vec<PathBuf>,
 }
 
 /// Read-only projection of `Doc` used as the frozen index view during the
-/// markup phase. Omits `content` (mutated by `markup::render`), `outlinks`
+/// markup phase. Omits `content` (mutated by `markup::render`), `links`
 /// (populated by `markup::render`), `data` (raw frontmatter — uplifted fields
 /// cover the typical uses), and `template` (a per-doc instruction, not
 /// cross-doc metadata). The type system then enforces that wikilink
@@ -91,7 +91,7 @@ impl Default for Doc {
             date: DateTime::<Utc>::UNIX_EPOCH,
             updated: DateTime::<Utc>::UNIX_EPOCH,
             data: Mapping::new(),
-            outlinks: Vec::new(),
+            links: Vec::new(),
         }
     }
 }
@@ -119,7 +119,7 @@ impl Doc {
             date,
             updated,
             data,
-            outlinks: Vec::new(),
+            links: Vec::new(),
         }
     }
 

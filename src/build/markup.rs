@@ -14,7 +14,7 @@ const SUMMARY_MAX_CHARS: usize = 250;
 
 /// Run the markup phase over `doc`. Renders the body string through the
 /// restricted Tera env, then for Markdown docs parses with comrak, resolves
-/// wikilinks on the AST (populating `doc.outlinks`), and renders to HTML.
+/// wikilinks on the AST (populating `doc.links`), and renders to HTML.
 /// Wikilink target resolution uses `env.stem_index`, the frozen stem→candidate
 /// grouping built when the env was constructed. Exposed publicly so
 /// `generate::run` can apply the same transformation to its emitted docs.
@@ -53,7 +53,7 @@ pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Resul
         DocKind::Markdown => {
             let arena = comrak::Arena::new();
             let root = comrak::parse_document(&arena, &rendered, &env.options);
-            doc.outlinks = wikilink::resolve_in_ast(root, doc, &env.stem_index);
+            doc.links = wikilink::resolve_in_ast(root, doc, &env.stem_index);
             let mut plugins = comrak::options::Plugins::default();
             plugins.render.codefence_syntax_highlighter = Some(env.syntect.as_ref());
             let mut out = String::new();
@@ -168,7 +168,7 @@ mod tests {
 
 pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
     // Frozen `DocMeta` view of the index for wikilink resolution and the
-    // URL filters. The projection drops `content`/`outlinks`/`data`/
+    // URL filters. The projection drops `content`/`links`/`data`/
     // `template`, so the type system enforces that the markup phase can't
     // read another doc's body or stale markup-phase state.
     let snapshot: Arc<Vec<DocMeta>> =

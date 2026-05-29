@@ -38,9 +38,9 @@ pub fn build_stem_index(docs: &[DocMeta]) -> HashMap<String, Vec<DocMeta>> {
 /// markup env sets `render.unsafe_`.
 ///
 /// Returns the deduplicated list of resolved target `id_path`s — the source
-/// doc's outlinks (consumed by Phase 10 backlinks). This is the one piece of
+/// doc's links (consumed by Phase 10 backlinks). This is the one piece of
 /// cross-doc state the markup phase produces, so the caller must assign it to
-/// `doc.outlinks`.
+/// `doc.links`.
 ///
 /// Spec §8: global stem-slug match across all docs; ties broken by minimum
 /// directory distance to the source, then by lexicographically smallest
@@ -52,7 +52,7 @@ pub fn resolve_in_ast<'a>(
     source: &Doc,
     stem_index: &HashMap<String, Vec<DocMeta>>,
 ) -> Vec<PathBuf> {
-    let mut outlinks: Vec<PathBuf> = Vec::new();
+    let mut links: Vec<PathBuf> = Vec::new();
 
     // Collect first, then mutate: detaching a node's children mid-traversal
     // would disturb the `descendants()` iterator.
@@ -71,8 +71,8 @@ pub fn resolve_in_ast<'a>(
         let replacement = match resolve(&target, &source.id_path, stem_index) {
             Some(doc) => {
                 let url = permalink::to_url(&doc.output_path);
-                if !outlinks.contains(&doc.id_path) {
-                    outlinks.push(doc.id_path.clone());
+                if !links.contains(&doc.id_path) {
+                    links.push(doc.id_path.clone());
                 }
                 render_link(&url, &display)
             }
@@ -94,7 +94,7 @@ pub fn resolve_in_ast<'a>(
         node.data.borrow_mut().value = NodeValue::HtmlInline(replacement);
     }
 
-    outlinks
+    links
 }
 
 /// Concatenate the text of a node's descendant `Text` nodes — the wikilink's
@@ -252,28 +252,28 @@ mod tests {
         options.extension.wikilinks_title_after_pipe = true;
         let root = comrak::parse_document(&arena, body, &options);
         let stem_index = build_stem_index(docs);
-        let outlinks = resolve_in_ast(root, source, &stem_index);
+        let links = resolve_in_ast(root, source, &stem_index);
         let mut out = String::new();
         comrak::format_html(root, &options, &mut out).unwrap();
-        (out, outlinks)
+        (out, links)
     }
 
     #[test]
     fn resolves_same_dir() {
         let source = source_doc("blog/a.md");
         let docs = vec![DocMeta::from(&source), doc_at("blog/b.md")];
-        let (out, outlinks) = render_md("see [[b]]", &source, &docs);
+        let (out, links) = render_md("see [[b]]", &source, &docs);
         assert!(out.contains(r#"<a class="wikilink" href="/blog/b.html">b</a>"#));
-        assert_eq!(outlinks, vec![PathBuf::from("blog/b.md")]);
+        assert_eq!(links, vec![PathBuf::from("blog/b.md")]);
     }
 
     #[test]
     fn walks_to_parent() {
         let source = source_doc("blog/2025/deep.md");
         let docs = vec![DocMeta::from(&source), doc_at("hello.md")];
-        let (out, outlinks) = render_md("see [[hello]]", &source, &docs);
+        let (out, links) = render_md("see [[hello]]", &source, &docs);
         assert!(out.contains(r#"href="/hello.html""#));
-        assert_eq!(outlinks, vec![PathBuf::from("hello.md")]);
+        assert_eq!(links, vec![PathBuf::from("hello.md")]);
     }
 
     #[test]
@@ -296,25 +296,25 @@ mod tests {
     fn unresolved_emits_nolink_span() {
         let source = source_doc("a.md");
         let docs = vec![DocMeta::from(&source)];
-        let (out, outlinks) = render_md("[[Missing]]", &source, &docs);
+        let (out, links) = render_md("[[Missing]]", &source, &docs);
         assert!(out.contains(r#"<span class="nolink">Missing</span>"#));
-        assert!(outlinks.is_empty());
+        assert!(links.is_empty());
     }
 
     #[test]
-    fn records_outlinks() {
+    fn records_links() {
         let source = source_doc("a.md");
         let docs = vec![DocMeta::from(&source), doc_at("b.md"), doc_at("c.md")];
-        let (_, outlinks) = render_md("[[b]] and [[c]]", &source, &docs);
-        assert_eq!(outlinks, vec![PathBuf::from("b.md"), PathBuf::from("c.md")]);
+        let (_, links) = render_md("[[b]] and [[c]]", &source, &docs);
+        assert_eq!(links, vec![PathBuf::from("b.md"), PathBuf::from("c.md")]);
     }
 
     #[test]
-    fn dedups_outlinks() {
+    fn dedups_links() {
         let source = source_doc("a.md");
         let docs = vec![DocMeta::from(&source), doc_at("b.md")];
-        let (_, outlinks) = render_md("[[b]] [[b]] [[b|again]]", &source, &docs);
-        assert_eq!(outlinks, vec![PathBuf::from("b.md")]);
+        let (_, links) = render_md("[[b]] [[b]] [[b|again]]", &source, &docs);
+        assert_eq!(links, vec![PathBuf::from("b.md")]);
     }
 
     #[test]
@@ -332,19 +332,19 @@ mod tests {
         // WikiLink node inside a code block, so `[[b]]` stays literal.
         let source = source_doc("a.md");
         let docs = vec![DocMeta::from(&source), doc_at("b.md")];
-        let (out, outlinks) = render_md("```\n[[b]]\n```", &source, &docs);
+        let (out, links) = render_md("```\n[[b]]\n```", &source, &docs);
         assert!(!out.contains("wikilink"));
         assert!(out.contains("[[b]]"));
-        assert!(outlinks.is_empty());
+        assert!(links.is_empty());
     }
 
     #[test]
     fn wikilink_inside_inline_code_is_not_linked() {
         let source = source_doc("a.md");
         let docs = vec![DocMeta::from(&source), doc_at("b.md")];
-        let (out, outlinks) = render_md("use `[[b]]` syntax", &source, &docs);
+        let (out, links) = render_md("use `[[b]]` syntax", &source, &docs);
         assert!(!out.contains("wikilink"));
-        assert!(outlinks.is_empty());
+        assert!(links.is_empty());
     }
 
     #[test]

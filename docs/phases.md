@@ -12,7 +12,7 @@ reference for what each phase can see and do.
 | # | Phase    | Reads                       | Writes                          |
 |---|----------|-----------------------------|---------------------------------|
 | 1 | load     | filesystem (`content/`)     | `Vec<Doc>` with raw bodies      |
-| 2 | markup   | `Arc<Vec<Meta>>` snapshot   | `doc.content` (rendered HTML), `doc.outlinks` |
+| 2 | markup   | `Arc<Vec<Meta>>` snapshot   | `doc.content` (rendered HTML), `doc.links` |
 | 3 | generate | `Arc<Vec<Doc>>` snapshot    | appended `Doc`s (pre-rendered)  |
 | 4 | template | `Arc<Vec<Doc>>` snapshot    | final HTML for each doc         |
 | 5 | write    | rendered docs               | filesystem (`build/`)           |
@@ -73,15 +73,15 @@ filters," not on raw bytes.)
 `templates/macros/*.html` are auto-imported. `query` and `backlinks` are
 **not** registered — the index is not meaningful for listing yet.
 
-**Outlinks population:** `wikilink::expand` returns `(expanded_string,
-outlinks)` and `markup::render` writes the outlinks back onto the doc. This
+**Links population:** `wikilink::expand` returns `(expanded_string,
+links)` and `markup::render` writes the links back onto the doc. This
 happens here because the wikilink substring scan is already walking the body —
-no separate pass needed. Only `[[wikilinks]]` count as outlinks; plain
+no separate pass needed. Only `[[wikilinks]]` count as links; plain
 Markdown `[label](other.md)` links do not. The wikilink syntax is the
 intentional "this is a cross-doc reference" signal; backlinks reflect that.
 
 **Output:** every source doc has `content` set to rendered HTML and
-`outlinks` populated.
+`links` populated.
 
 ---
 
