@@ -20,7 +20,7 @@ const SUMMARY_MAX_CHARS: usize = 250;
 /// `generate::run` can apply the same transformation to its emitted docs.
 pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Result<()> {
     let mut ctx = tera::Context::new();
-    ctx.insert("doc", &*doc);
+    ctx.insert("page", &*doc);
     ctx.insert("site", &site_data.site);
     ctx.insert("data", &site_data.data);
     if let Some(pagination) = doc.data.get("pagination") {

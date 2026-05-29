@@ -1,0 +1,1 @@
+<ul>{% for p in query(path="*.md", omit=[page.id_path]) %}<li>{{ p.title }}</li>{% endfor %}</ul>

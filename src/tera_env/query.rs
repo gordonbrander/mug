@@ -84,6 +84,20 @@ fn from_kwargs(args: &HashMap<String, Value>) -> tera::Result<Query> {
         };
     }
 
+    if let Some(v) = args.get("omit") {
+        let arr = v
+            .as_array()
+            .ok_or_else(|| tera::Error::msg("query: `omit` must be an array of strings"))?;
+        q.omit = arr
+            .iter()
+            .map(|e| {
+                e.as_str()
+                    .map(std::path::PathBuf::from)
+                    .ok_or_else(|| tera::Error::msg("query: `omit` entries must be strings"))
+            })
+            .collect::<tera::Result<Vec<_>>>()?;
+    }
+
     if let Some(v) = args.get("limit") {
         let n = v
             .as_u64()
@@ -126,6 +140,30 @@ mod tests {
         assert_eq!(q.order_by, OrderKey::Title);
         assert_eq!(q.sort, SortDir::Asc);
         assert_eq!(q.limit, Some(3));
+    }
+
+    #[test]
+    fn from_kwargs_parses_omit() {
+        let mut args = HashMap::new();
+        args.insert(
+            "omit".to_string(),
+            Value::Array(vec![val_str("posts/a.md"), val_str("posts/b.md")]),
+        );
+        let q = from_kwargs(&args).unwrap();
+        assert_eq!(
+            q.omit,
+            vec![
+                std::path::PathBuf::from("posts/a.md"),
+                std::path::PathBuf::from("posts/b.md")
+            ]
+        );
+    }
+
+    #[test]
+    fn from_kwargs_omit_not_array_errors() {
+        let mut args = HashMap::new();
+        args.insert("omit".to_string(), val_str("posts/a.md"));
+        assert!(from_kwargs(&args).is_err());
     }
 
     #[test]

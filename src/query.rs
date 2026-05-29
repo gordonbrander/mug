@@ -2,6 +2,8 @@ use crate::doc::Doc;
 use anyhow::{Result, anyhow};
 use globset::{Glob, GlobBuilder, GlobMatcher};
 use serde_yaml_ng::{Mapping, Value as YamlValue};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderKey {
@@ -22,6 +24,7 @@ pub struct Query {
     pub order_by: OrderKey,
     pub sort: SortDir,
     pub limit: Option<usize>,
+    pub omit: Vec<PathBuf>,
 }
 
 impl Default for Query {
@@ -32,13 +35,14 @@ impl Default for Query {
             order_by: OrderKey::Date,
             sort: SortDir::Desc,
             limit: None,
+            omit: Vec::new(),
         }
     }
 }
 
 /// Field names accepted by query-style kwargs. Shared with the Tera adapter
 /// in `tera_env::query` so both parsers reject the same typos.
-pub(crate) const KNOWN_KEYS: &[&str] = &["path", "tag", "order_by", "sort", "limit"];
+pub(crate) const KNOWN_KEYS: &[&str] = &["path", "tag", "order_by", "sort", "limit", "omit"];
 
 impl Query {
     /// Build from a YAML map (e.g. the `query:` sub-mapping in a generator's
@@ -114,6 +118,20 @@ impl Query {
             };
         }
 
+        if let Some(v) = m.get("omit") {
+            let seq = v
+                .as_sequence()
+                .ok_or_else(|| anyhow!("query: `omit` must be an array of strings"))?;
+            q.omit = seq
+                .iter()
+                .map(|e| {
+                    e.as_str()
+                        .map(PathBuf::from)
+                        .ok_or_else(|| anyhow!("query: `omit` entries must be strings"))
+                })
+                .collect::<Result<Vec<_>>>()?;
+        }
+
         if let Some(v) = m.get("limit") {
             let n = match v {
                 YamlValue::Number(n) => n
@@ -133,6 +151,7 @@ impl Query {
 /// correct, not the data structure.
 pub fn evaluate<'a>(q: &Query, docs: &'a [Doc]) -> Vec<&'a Doc> {
     let matcher: Option<GlobMatcher> = q.path.as_ref().map(Glob::compile_matcher);
+    let omit: HashSet<&Path> = q.omit.iter().map(PathBuf::as_path).collect();
 
     let mut results: Vec<&Doc> = docs
         .iter()
@@ -141,6 +160,9 @@ pub fn evaluate<'a>(q: &Query, docs: &'a [Doc]) -> Vec<&'a Doc> {
                 if !m.is_match(&d.id_path) {
                     return false;
                 }
+            }
+            if omit.contains(d.id_path.as_path()) {
+                return false;
             }
             if let Some(tag) = &q.tag {
                 if !d.tags.iter().any(|t| t == tag) {
@@ -227,6 +249,28 @@ mod tests {
     }
 
     #[test]
+    fn from_yaml_mapping_parses_omit() {
+        let m = yaml_mapping("omit:\n  - posts/a.md\n  - posts/b.md\n");
+        let q = Query::from_yaml_mapping(&m).unwrap();
+        assert_eq!(
+            q.omit,
+            vec![PathBuf::from("posts/a.md"), PathBuf::from("posts/b.md")]
+        );
+    }
+
+    #[test]
+    fn from_yaml_mapping_omit_not_sequence_errors() {
+        let m = yaml_mapping("omit: posts/a.md\n");
+        assert!(Query::from_yaml_mapping(&m).is_err());
+    }
+
+    #[test]
+    fn from_yaml_mapping_omit_non_string_entry_errors() {
+        let m = yaml_mapping("omit:\n  - 42\n");
+        assert!(Query::from_yaml_mapping(&m).is_err());
+    }
+
+    #[test]
     fn evaluate_filters_by_path_glob() {
         let docs = vec![
             doc("posts/a.md", "A", "2025-01-01"),
@@ -276,6 +320,30 @@ mod tests {
         let results = evaluate(&q, &docs);
         let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
         assert_eq!(titles, vec!["Alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn evaluate_excludes_omitted_docs() {
+        let docs = vec![
+            doc("a.md", "A", "2025-01-01"),
+            doc("b.md", "B", "2025-02-01"),
+            doc("c.md", "C", "2025-03-01"),
+        ];
+        let q = Query::from_yaml_mapping(&yaml_mapping("omit:\n  - b.md\n")).unwrap();
+        let results = evaluate(&q, &docs);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["C", "A"]);
+    }
+
+    #[test]
+    fn evaluate_omit_nonexistent_path_keeps_all() {
+        let docs = vec![
+            doc("a.md", "A", "2025-01-01"),
+            doc("b.md", "B", "2025-02-01"),
+        ];
+        let q = Query::from_yaml_mapping(&yaml_mapping("omit:\n  - nope.md\n")).unwrap();
+        let results = evaluate(&q, &docs);
+        assert_eq!(results.len(), 2);
     }
 
     #[test]

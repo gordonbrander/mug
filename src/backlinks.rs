@@ -1,10 +1,12 @@
 use crate::doc::Doc;
 use crate::query::{OrderKey, SortDir};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 pub struct Backlinks {
     pub order_by: OrderKey,
     pub sort: SortDir,
+    pub omit: Vec<PathBuf>,
 }
 
 impl Default for Backlinks {
@@ -12,6 +14,7 @@ impl Default for Backlinks {
         Self {
             order_by: OrderKey::Date,
             sort: SortDir::Desc,
+            omit: Vec::new(),
         }
     }
 }
@@ -20,9 +23,11 @@ impl Default for Backlinks {
 /// then sort. No persistent inverted graph — the spec §11 "fully populated
 /// before listing" invariant is what makes this correct.
 pub fn list_backlinks<'a>(docs: &'a [Doc], target: &Path, b: &Backlinks) -> Vec<&'a Doc> {
+    let omit: HashSet<&Path> = b.omit.iter().map(PathBuf::as_path).collect();
+
     let mut results: Vec<&Doc> = docs
         .iter()
-        .filter(|d| d.outlinks.iter().any(|o| o == target))
+        .filter(|d| !omit.contains(d.id_path.as_path()) && d.outlinks.iter().any(|o| o == target))
         .collect();
 
     results.sort_by(|a, b2| {
@@ -119,10 +124,44 @@ mod tests {
         let b = Backlinks {
             order_by: OrderKey::Title,
             sort: SortDir::Asc,
+            ..Default::default()
         };
         let results = list_backlinks(&docs, Path::new("target.md"), &b);
         let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
         assert_eq!(titles, vec!["Alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn list_backlinks_excludes_omitted_docs() {
+        let docs = vec![
+            doc("a.md", "A", "2025-01-01", &["target.md"]),
+            doc("b.md", "B", "2025-02-01", &["target.md"]),
+            doc("c.md", "C", "2025-03-01", &["target.md"]),
+        ];
+        let b = Backlinks {
+            omit: vec![PathBuf::from("b.md")],
+            ..Default::default()
+        };
+        let results = list_backlinks(&docs, Path::new("target.md"), &b);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["C", "A"]);
+    }
+
+    #[test]
+    fn list_backlinks_omit_self_drops_self_link() {
+        // The common case: a page links to itself but should not list itself
+        // among its own backlinks.
+        let docs = vec![
+            doc("a.md", "A", "2025-01-01", &["target.md"]),
+            doc("target.md", "Target", "2025-01-02", &["target.md"]),
+        ];
+        let b = Backlinks {
+            omit: vec![PathBuf::from("target.md")],
+            ..Default::default()
+        };
+        let results = list_backlinks(&docs, Path::new("target.md"), &b);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["A"]);
     }
 
     #[test]

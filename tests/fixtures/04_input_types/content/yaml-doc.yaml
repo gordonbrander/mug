@@ -1,3 +1,3 @@
 title: YAML Doc
 content: |
-  <p>Hello {{ doc.title }}</p>
+  <p>Hello {{ page.title }}</p>

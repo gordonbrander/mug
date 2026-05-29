@@ -201,6 +201,11 @@ fn defaults() {
 }
 
 #[test]
+fn query_omit() {
+    run_build("14_query_omit");
+}
+
+#[test]
 fn scaffold() {
     // The 12_scaffold fixture has no input files — just an `expected/` dir.
     // The test exercises the real scaffold code path: scaffold into a temp dir

@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><title>{{ doc.title }} | {{ site.title }}</title></head>
+<html><head><title>{{ page.title }} | {{ site.title }}</title></head>
 <body>
 <p>{{ site.description }}</p>
 <ul>{% for item in data.menu.items %}<li><a href="{{ item.url | safe }}">{{ item.title }}</a></li>{% endfor %}</ul>

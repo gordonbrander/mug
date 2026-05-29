@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tera::{Tera, Value};
 
-const KNOWN_KEYS: &[&str] = &["order_by", "sort"];
+const KNOWN_KEYS: &[&str] = &["order_by", "sort", "omit"];
 
 /// Register `backlinks` as a Tera filter on `env`. Usage:
 /// `{{ doc.id_path | backlinks(order_by="title", sort="asc") }}`. The piped
@@ -77,6 +77,20 @@ fn from_kwargs(args: &HashMap<String, Value>) -> tera::Result<Backlinks> {
         };
     }
 
+    if let Some(v) = args.get("omit") {
+        let arr = v
+            .as_array()
+            .ok_or_else(|| tera::Error::msg("backlinks: `omit` must be an array of strings"))?;
+        b.omit = arr
+            .iter()
+            .map(|e| {
+                e.as_str()
+                    .map(std::path::PathBuf::from)
+                    .ok_or_else(|| tera::Error::msg("backlinks: `omit` entries must be strings"))
+            })
+            .collect::<tera::Result<Vec<_>>>()?;
+    }
+
     Ok(b)
 }
 
@@ -122,6 +136,30 @@ mod tests {
             args.insert(k.to_string(), val_str("x"));
             assert!(from_kwargs(&args).is_err(), "key `{}` should error", k);
         }
+    }
+
+    #[test]
+    fn from_kwargs_parses_omit() {
+        let mut args = HashMap::new();
+        args.insert(
+            "omit".to_string(),
+            Value::Array(vec![val_str("a.md"), val_str("b.md")]),
+        );
+        let b = from_kwargs(&args).unwrap();
+        assert_eq!(
+            b.omit,
+            vec![
+                std::path::PathBuf::from("a.md"),
+                std::path::PathBuf::from("b.md")
+            ]
+        );
+    }
+
+    #[test]
+    fn from_kwargs_omit_not_array_errors() {
+        let mut args = HashMap::new();
+        args.insert("omit".to_string(), val_str("a.md"));
+        assert!(from_kwargs(&args).is_err());
     }
 
     #[test]

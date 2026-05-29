@@ -1,1 +1,1 @@
-<ul>{% for bl in doc.id_path | backlinks(order_by="title", sort="asc") %}<li>{{ bl.title }}</li>{% endfor %}</ul>
+<ul>{% for bl in page.id_path | backlinks(order_by="title", sort="asc") %}<li>{{ bl.title }}</li>{% endfor %}</ul>

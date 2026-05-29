@@ -3,13 +3,7 @@ use crate::index::Index;
 use crate::site_data::SiteData;
 use crate::tera_env::build_template_env;
 use anyhow::{Context, Result};
-use serde::Serialize;
 use std::sync::Arc;
-
-#[derive(Serialize)]
-struct Page<'a> {
-    content: &'a str,
-}
 
 pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
     // Snapshot the index for the `query` function. By spec §11, the index is
@@ -24,13 +18,7 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
         };
 
         let mut ctx = tera::Context::new();
-        ctx.insert("doc", &*doc);
-        ctx.insert(
-            "page",
-            &Page {
-                content: &doc.content,
-            },
-        );
+        ctx.insert("page", &*doc);
         ctx.insert("site", &site_data.site);
         ctx.insert("data", &site_data.data);
         if let Some(pagination) = doc.data.get("pagination") {

@@ -1,6 +1,6 @@
 ---
 title: Markdown Post
 ---
-# Hello {{ doc.title }}
+# Hello {{ page.title }}
 
 Body text.

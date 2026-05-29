@@ -78,8 +78,8 @@ Recognized frontmatter keys (all optional):
 | `updated`   | file modified time                       |
 | `permalink` | mirror of source path (see below)        |
 
-Any other key is preserved verbatim on `doc.data` and reachable from templates
-as `{{ doc.data.your_key }}`.
+Any other key is preserved verbatim on `page.data` and reachable from templates
+as `{{ page.data.your_key }}`.
 
 ## Site config (`config.yaml`)
 
@@ -170,9 +170,8 @@ template: post.html
 
 Inside a template, the available context is:
 
-- `doc`: the current document (`doc.title`, `doc.tags`, `doc.date`, …, plus
-  `doc.data` for full frontmatter)
-- `page.content`: the document's rendered body
+- `page`: the current document (`page.title`, `page.tags`, `page.date`, …,
+  `page.content` for the rendered body, plus `page.data` for full frontmatter)
 - `site`: the `site:` submap from `config.yaml`
 - `data`: every top-level YAML file in `data/`, keyed by filename stem
 - `pagination`: (only on generator-emitted pages—see below)
@@ -182,7 +181,7 @@ Example `templates/base.html`:
 ```html
 <!doctype html>
 <html>
-<head><title>{{ doc.title }} | {{ site.title }}</title></head>
+<head><title>{{ page.title }} | {{ site.title }}</title></head>
 <body>
   <main>{{ page.content | safe }}</main>
 </body>
@@ -202,16 +201,30 @@ You can list posts in a template using `query` (available in **templates**).
 ```
 
 Kwargs: `path` (glob), `tag` (string), `order_by` (`title` | `date` |
-`updated`), `sort` (`asc` | `desc`), `limit` (integer). Default is
-`order_by=date, sort=desc`.
+`updated`), `sort` (`asc` | `desc`), `limit` (integer), `omit` (array of
+`id_path` strings to exclude). Default is `order_by=date, sort=desc`.
+
+Use `omit` to exclude specific documents — for example, to list sibling pages
+without the current page listing itself:
+
+```jinja
+{% for post in query(path="posts/*.md", omit=[page.id_path]) %}
+  <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
+{% endfor %}
+```
 
 ### `backlinks` — pages that link to this one
 
 ```jinja
-{% for src in doc.id_path | backlinks(order_by="title", sort="asc") %}
+{% for src in page.id_path | backlinks(order_by="title", sort="asc") %}
   <li>{{ src.title }}</li>
 {% endfor %}
 ```
+
+Kwargs: `order_by` (`title` | `date` | `updated`), `sort` (`asc` | `desc`),
+`omit` (array of `id_path` strings to exclude — e.g. `omit=[page.id_path]` to
+drop a page's self-link from its own backlinks). Default is
+`order_by=date, sort=desc`.
 
 Available in templates only.
 
