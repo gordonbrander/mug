@@ -50,6 +50,8 @@ pub fn run(host: IpAddr, port: u16) -> Result<()> {
 
     let reload_tx_watcher = reload_tx.clone();
     std::thread::spawn(move || {
+        // serve already built the site before binding (above); watch_loop is
+        // purely the loop and does no initial build, so the site is built once.
         let result = crate::command::watch::watch_loop(|build_result| {
             if build_result.is_ok() {
                 let _ = reload_tx_watcher.send(());

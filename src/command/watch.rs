@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 const DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub fn run() -> Result<()> {
+    // Build once up front so the output is ready before we start watching. A
+    // failed build is logged (by `rebuild`) but doesn't stop us from watching.
+    let _ = rebuild();
     watch_loop(|_| {})
 }
 
@@ -21,13 +24,14 @@ pub fn run() -> Result<()> {
 /// fires after each rebuild attempt with its `Result`, so callers (e.g.
 /// `serve`) can react to success/failure — broadcasting a reload only on `Ok`,
 /// for instance.
+///
+/// This is purely the watch loop: it does *not* build once up front. Callers
+/// own the initial build, because they disagree on how to handle its failure —
+/// `watch` logs and keeps watching, `serve` aborts startup (`build::run()?`).
 pub fn watch_loop<F>(mut on_rebuild: F) -> Result<()>
 where
     F: FnMut(&Result<()>),
 {
-    let initial = rebuild();
-    on_rebuild(&initial);
-
     let (config, _) = Config::load(Path::new("config.yaml"))?;
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(DEBOUNCE, tx)?;
