@@ -81,7 +81,7 @@ where noted, with defined fallbacks.
 | `template`    | Uplifted from frontmatter (`template`).                                          |
 | `title`       | Uplifted from frontmatter; defaults to `""`.                                     |
 | `content`     | The rendered body (HTML after the markup phase). See §6.                         |
-| `tags`        | Uplifted from frontmatter; defaults to `[]`.                                     |
+| `tags`        | Slug → display-text map. Uplifted from frontmatter (and inline `#hashtag`s when enabled); defaults to `{}`. See §5.2. |
 | `date`        | `date` frontmatter → file created time → file updated time.                      |
 | `updated`     | `updated` frontmatter → file updated time.                                       |
 | `data`        | The verbatim frontmatter map (everything, including the uplifted keys).          |
@@ -100,6 +100,26 @@ Example: `permalink: /blog/:yyyy/:slug/`.
 
 `output_path` is computed **before** rendering, because the markup phase needs to
 resolve `permalink`-based links (see §6.1).
+
+### 5.2 Tags
+
+`tags` is a map **keyed by the slugified tag text, with the display text as the
+value** (e.g. `My Tag` → `my-tag: "My Tag"`). Keying by slug deduplicates tags
+that slugify identically and gives templates both a URL-safe slug and the
+original text; iteration is sorted by slug for deterministic output. Templates
+iterate `{% for slug, text in page.tags %}`, and `query(tag=…)` matches by slug,
+so `tag="My Tag"` and `tag="my-tag"` are equivalent (see §9).
+
+Tags come from the frontmatter `tags:` sequence. Optionally — when
+`hashtags: true` is set in `config.yaml` — the markup phase also scans Markdown
+bodies for inline `#hashtag`s, adds them to `tags`, and **strips them from the
+rendered output**. A hashtag is a `#` at a word boundary (start of text or after
+whitespace) followed by `[A-Za-z0-9_-/]` (so slug paths like `#project/mug`
+work) containing at least one letter (so `#123` is ignored). Because scanning
+runs on the parsed Markdown AST, heading markers (`# Heading`) and code
+spans/fences are never mistaken for tags. Frontmatter text wins on a slug
+collision with an inline hashtag. The flag is off by default, leaving literal
+`#` in prose untouched.
 
 ---
 

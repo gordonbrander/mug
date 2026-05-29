@@ -165,7 +165,9 @@ pub fn evaluate<'a>(q: &Query, docs: &'a [Doc]) -> Vec<&'a Doc> {
                 return false;
             }
             if let Some(tag) = &q.tag {
-                if !d.tags.iter().any(|t| t == tag) {
+                // Match by slug so `tag="My Tag"` and `tag="my-tag"` are
+                // equivalent — `d.tags` is keyed by the same slug.
+                if !d.tags.contains_key(&slug::slugify(tag)) {
                     return false;
                 }
             }
@@ -286,9 +288,9 @@ mod tests {
     #[test]
     fn evaluate_filters_by_tag() {
         let mut a = doc("a.md", "A", "2025-01-01");
-        a.tags = vec!["rust".into()];
+        a.tags.insert("rust".into(), "rust".into());
         let mut b = doc("b.md", "B", "2025-01-02");
-        b.tags = vec!["other".into()];
+        b.tags.insert("other".into(), "other".into());
         let docs = vec![a, b];
         let q = Query::from_yaml_mapping(&yaml_mapping("tag: rust\n")).unwrap();
         let results = evaluate(&q, &docs);

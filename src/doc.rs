@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +17,13 @@ pub struct Doc {
     pub title: String,
     pub summary: String,
     pub content: String,
-    pub tags: Vec<String>,
+    /// Tags keyed by slug → display text. Built from frontmatter `tags:` and,
+    /// when the `hashtags` config flag is set, from inline `#hashtag`s found in
+    /// the body during the markup phase. A `BTreeMap` so iteration (and thus
+    /// rendered output) is deterministic, sorted by slug, and tags that
+    /// slugify identically collapse to one entry. Serializes to a slug→text
+    /// object for templates: `{% for slug, text in page.tags %}`.
+    pub tags: BTreeMap<String, String>,
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     pub data: Mapping,
@@ -36,7 +43,7 @@ pub struct DocMeta {
     pub output_path: PathBuf,
     pub title: String,
     pub summary: String,
-    pub tags: Vec<String>,
+    pub tags: BTreeMap<String, String>,
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
 }
@@ -87,7 +94,7 @@ impl Default for Doc {
             title: String::new(),
             summary: String::new(),
             content: String::new(),
-            tags: Vec::new(),
+            tags: BTreeMap::new(),
             date: DateTime::<Utc>::UNIX_EPOCH,
             updated: DateTime::<Utc>::UNIX_EPOCH,
             data: Mapping::new(),
@@ -202,13 +209,29 @@ fn uplift_string(data: &Mapping, key: &str) -> Option<String> {
     data.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-fn uplift_tags(data: &Mapping) -> Vec<String> {
+fn uplift_tags(data: &Mapping) -> BTreeMap<String, String> {
+    let mut tags = BTreeMap::new();
     let Some(Value::Sequence(seq)) = data.get("tags") else {
-        return Vec::new();
+        return tags;
     };
-    seq.iter()
-        .filter_map(|v| v.as_str().map(str::to_string))
-        .collect()
+    for v in seq {
+        if let Some(text) = v.as_str() {
+            insert_tag(&mut tags, text);
+        }
+    }
+    tags
+}
+
+/// Slugify `text` and insert it under that slug → display text, first-write-
+/// wins (so a frontmatter tag's display text survives a later slug-colliding
+/// inline hashtag). No-op for text that slugifies to empty. Shared by
+/// `uplift_tags` and the markup-phase hashtag pass.
+pub(crate) fn insert_tag(tags: &mut BTreeMap<String, String>, text: &str) {
+    let slug = slug::slugify(text);
+    if slug.is_empty() {
+        return;
+    }
+    tags.entry(slug).or_insert_with(|| text.to_string());
 }
 
 pub(crate) fn parse_date(value: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -283,7 +306,10 @@ mod tests {
             ]),
         )]);
         let d = Doc::new(PathBuf::from("p.md"), String::new(), data);
-        assert_eq!(d.tags, vec!["rust".to_string(), "ssg".to_string()]);
+        // Keyed by slug → display text; non-string entries (the `7`) are skipped.
+        assert_eq!(d.tags.len(), 2);
+        assert_eq!(d.tags["rust"], "rust");
+        assert_eq!(d.tags["ssg"], "ssg");
     }
 
     #[test]
@@ -375,7 +401,8 @@ mod tests {
         let source = "title: Hi\ntags: [a, b]\ndate: 2025-10-31\ncontent: \"<p>body</p>\"\n";
         let d = Doc::parse_yaml(PathBuf::from("p.yaml"), source).unwrap();
         assert_eq!(d.title, "Hi");
-        assert_eq!(d.tags, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(d.tags["a"], "a");
+        assert_eq!(d.tags["b"], "b");
         assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
         assert_eq!(d.content, "<p>body</p>");
     }

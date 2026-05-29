@@ -47,6 +47,9 @@ pub struct MarkupEnv {
     /// Slugified file-stem → candidate docs, built once from the snapshot so
     /// wikilink resolution is a hash lookup rather than a full scan per link.
     pub stem_index: HashMap<String, Vec<DocMeta>>,
+    /// Mirror of `Config::hashtags`: when true, `markup::render` runs the
+    /// inline `#hashtag` extraction pass.
+    pub hashtags: bool,
 }
 
 /// comrak options for the markup phase. `unsafe_` passes raw HTML through (Tera
@@ -82,6 +85,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
         options: markup_options(),
         syntect: SYNTECT.clone(),
         stem_index,
+        hashtags: config.hashtags,
     })
 }
 

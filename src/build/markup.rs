@@ -1,3 +1,4 @@
+pub(crate) mod hashtag;
 pub(crate) mod wikilink;
 
 use crate::config::Config;
@@ -55,6 +56,16 @@ pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Resul
             let arena = comrak::Arena::new();
             let root = comrak::parse_document(&arena, &rendered, &env.options);
             doc.links = wikilink::resolve_in_ast(root, doc, &env.stem_index);
+            // Inline `#hashtag`s (opt-in): extracted into `doc.tags` and
+            // stripped from the body. Tags added here land too late for this
+            // doc's own body Tera (already rendered above) but are visible to
+            // the generate phase (live index) and the template phase (its
+            // snapshot is cloned after markup) — same lifecycle as `doc.links`.
+            if env.hashtags {
+                for text in hashtag::extract_in_ast(root) {
+                    crate::doc::insert_tag(&mut doc.tags, &text);
+                }
+            }
             let mut plugins = comrak::options::Plugins::default();
             plugins.render.codefence_syntax_highlighter = Some(env.syntect.as_ref());
             let mut out = String::new();

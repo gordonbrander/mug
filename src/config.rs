@@ -14,6 +14,11 @@ pub struct Config {
     pub static_dir: PathBuf,
     pub data_dir: PathBuf,
     pub generators_dir: PathBuf,
+    /// When set, the markup phase scans Markdown bodies for inline `#hashtag`s,
+    /// adds them to each doc's `tags`, and strips them from the rendered HTML.
+    /// Off by default so literal `#` in prose is untouched. Sourced from the
+    /// top-level `hashtags:` key in `config.yaml`.
+    pub hashtags: bool,
     /// Origin for absolute URLs (e.g. `https://example.com`), no trailing slash.
     /// Sourced from `site.url`. Filters that produce absolute URLs degrade
     /// gracefully (to root-relative) when `None`.
@@ -40,6 +45,7 @@ impl Default for Config {
             static_dir: PathBuf::from("static"),
             data_dir: PathBuf::from("data"),
             generators_dir: PathBuf::from("generators"),
+            hashtags: false,
             site_url: None,
             base_path: String::new(),
             defaults: Defaults::default(),
