@@ -7,6 +7,7 @@ use crate::index::Index;
 use crate::site_data::SiteData;
 use crate::tera_env::{MarkupEnv, build_markup_env};
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -173,9 +174,14 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
     // read another doc's body or stale markup-phase state.
     let snapshot: Arc<Vec<DocMeta>> =
         Arc::new(index.docs.iter().map(DocMeta::from).collect());
-    let mut env = build_markup_env(config, snapshot.clone())?;
-    for doc in &mut index.docs {
-        render(&mut env, site_data, doc)?;
-    }
-    Ok(())
+    let env = build_markup_env(config, snapshot.clone())?;
+    // Each doc renders independently — it mutates only its own fields, while
+    // `env` (Tera, comrak options, syntect, stem index) and `site_data` are
+    // read-only. `render_str` needs `&mut Tera`, so each Rayon worker gets its
+    // own clone of the env via `try_for_each_init` (cloned once per worker,
+    // not per doc). `par_iter_mut` preserves doc order, so output is identical.
+    index
+        .docs
+        .par_iter_mut()
+        .try_for_each_init(|| env.clone(), |env, doc| render(env, site_data, doc))
 }

@@ -38,6 +38,7 @@ static SYNTECT: LazyLock<Arc<SyntectAdapter>> = LazyLock::new(|| {
 /// `macro_preamble` to every body before `render_str`. `options` and `syntect`
 /// drive the comrak pass; the syntect adapter loads its syntax/theme sets once
 /// here rather than per-doc.
+#[derive(Clone)]
 pub struct MarkupEnv {
     pub tera: Tera,
     pub macro_preamble: String,

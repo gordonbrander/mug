@@ -3,6 +3,7 @@ use crate::index::Index;
 use crate::site_data::SiteData;
 use crate::tera_env::build_template_env;
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use std::sync::Arc;
 
 pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
@@ -12,9 +13,13 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
     let snapshot = Arc::new(index.docs.clone());
     let env = build_template_env(config, snapshot)?;
 
-    for doc in &mut index.docs {
+    // Each doc renders independently against the frozen `env`/`site_data`
+    // snapshot and writes only its own `content`. `Tera::render` takes `&self`,
+    // so the env is shared across workers by reference (no per-thread clone).
+    // `par_iter_mut` preserves doc order, so output is identical.
+    index.docs.par_iter_mut().try_for_each(|doc| {
         let Some(template_name) = doc.template.clone() else {
-            continue;
+            return Ok(());
         };
 
         let mut ctx = tera::Context::new();
@@ -32,6 +37,6 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
                 doc.id_path.display()
             )
         })?;
-    }
-    Ok(())
+        Ok::<(), anyhow::Error>(())
+    })
 }
