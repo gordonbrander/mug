@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use globset::{Glob, GlobBuilder};
+use globset::{GlobBuilder, GlobMatcher};
 use serde_yaml_ng::{Mapping, Value};
 use std::path::Path;
 
@@ -10,8 +10,9 @@ use std::path::Path;
 /// else) can be defaulted by file pattern.
 #[derive(Debug, Default)]
 pub struct Defaults {
-    /// (glob, default frontmatter map), in config order. Later entries win.
-    rules: Vec<(Glob, Mapping)>,
+    /// (compiled glob matcher, default frontmatter map), in config order.
+    /// Later entries win. Matchers are compiled once at construction.
+    rules: Vec<(GlobMatcher, Mapping)>,
 }
 
 impl Defaults {
@@ -25,14 +26,15 @@ impl Defaults {
             let pat = k
                 .as_str()
                 .ok_or_else(|| anyhow!("defaults: keys must be glob strings"))?;
-            let glob = GlobBuilder::new(pat)
+            let matcher = GlobBuilder::new(pat)
                 .literal_separator(true)
                 .build()
-                .map_err(|e| anyhow!("defaults: invalid glob `{}`: {}", pat, e))?;
+                .map_err(|e| anyhow!("defaults: invalid glob `{}`: {}", pat, e))?
+                .compile_matcher();
             let Value::Mapping(map) = v else {
                 return Err(anyhow!("defaults: value for `{}` must be a mapping", pat));
             };
-            rules.push((glob, map.clone()));
+            rules.push((matcher, map.clone()));
         }
         Ok(Self { rules })
     }
@@ -45,8 +47,8 @@ impl Defaults {
     pub fn apply(&self, id_path: &Path, data: &mut Mapping) -> bool {
         // Combine matching rules in order so later entries overwrite earlier.
         let mut combined = Mapping::new();
-        for (glob, map) in &self.rules {
-            if glob.compile_matcher().is_match(id_path) {
+        for (matcher, map) in &self.rules {
+            if matcher.is_match(id_path) {
                 for (k, v) in map {
                     combined.insert(k.clone(), v.clone());
                 }
