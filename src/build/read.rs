@@ -27,7 +27,7 @@ pub fn run(config: &Config) -> Result<Index> {
             .strip_prefix(&config.content_dir)
             .with_context(|| format!("could not strip prefix from {}", path.display()))?
             .to_path_buf();
-        let doc = Doc::load(&config.content_dir, &id_path)?;
+        let doc = Doc::load(&config.content_dir, &id_path, &config.defaults)?;
         index.insert(doc);
     }
     Ok(index)

@@ -5,3 +5,10 @@ site:
   url: https://example.com
   # Subpath the site is hosted under, e.g. "/blog". Leave empty for root.
   base_path: ""
+
+# Default frontmatter applied by file glob. Values fill keys a document did not
+# set itself (a document's own frontmatter always wins). When several globs
+# match, later entries win. `*` does not cross `/`; use `**` to recurse.
+# defaults:
+#   "posts/*.md":
+#     permalink: ":yyyy/:mm/:dd/:slug"

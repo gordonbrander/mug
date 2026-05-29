@@ -1,0 +1,6 @@
+site:
+  title: My Site
+  description: A test site
+defaults:
+  "posts/*.md":
+    permalink: /blog/:yyyy/:slug/

@@ -1,3 +1,4 @@
+use crate::defaults::Defaults;
 use crate::frontmatter;
 use crate::permalink;
 use anyhow::{Context, Result};
@@ -127,20 +128,15 @@ impl Doc {
     /// YAML; missing or unterminated frontmatter is silently treated as no
     /// frontmatter (see `frontmatter::split`).
     pub fn parse(id_path: PathBuf, source: &str) -> Result<Doc> {
-        let (data, body) = frontmatter::parse(source)?;
-        Ok(Doc::new(id_path, body.to_string(), data))
+        let (data, body) = split_markdown(source)?;
+        Ok(Doc::new(id_path, body, data))
     }
 
     /// Build a Doc from a `.yaml` source: the whole file is the data map; the
     /// `content` field (if present and a string) becomes the body. Non-string
     /// or missing `content` defaults to an empty body.
     pub fn parse_yaml(id_path: PathBuf, source: &str) -> Result<Doc> {
-        let data = frontmatter::parse_yaml(source)?;
-        let content = data
-            .get("content")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_default();
+        let (data, content) = split_yaml(source)?;
         Ok(Doc::new(id_path, content, data))
     }
 
@@ -156,17 +152,21 @@ impl Doc {
     /// Read `content_dir.join(id_path)` from disk, parse it, and apply the
     /// filesystem-based fallback chain for `date` (created → modified) and
     /// `updated` (modified) when frontmatter didn't supply a parseable value.
-    pub fn load(content_dir: &Path, id_path: &Path) -> Result<Doc> {
+    pub fn load(content_dir: &Path, id_path: &Path, defaults: &Defaults) -> Result<Doc> {
         let fs_path = content_dir.join(id_path);
         let source = fs::read_to_string(&fs_path)
             .with_context(|| format!("could not read {}", fs_path.display()))?;
         let meta = fs::metadata(&fs_path)
             .with_context(|| format!("could not stat {}", fs_path.display()))?;
-        let parsed = match DocKind::from(id_path) {
-            DocKind::Yaml => Doc::parse_yaml(id_path.to_path_buf(), &source),
-            _ => Doc::parse(id_path.to_path_buf(), &source),
-        };
-        let mut doc = parsed.with_context(|| format!("could not parse {}", fs_path.display()))?;
+        let (mut data, body) = match DocKind::from(id_path) {
+            DocKind::Yaml => split_yaml(&source),
+            _ => split_markdown(&source),
+        }
+        .with_context(|| format!("could not parse {}", fs_path.display()))?;
+        // Merge config defaults into the raw frontmatter before constructing
+        // the Doc, so uplifted fields and the expanded permalink reflect them.
+        defaults.apply(id_path, &mut data);
+        let mut doc = Doc::new(id_path.to_path_buf(), body, data);
 
         let date_from_fs = parse_date(doc.data.get("date")).is_none();
         if date_from_fs {
@@ -189,6 +189,27 @@ impl Doc {
         }
         Ok(doc)
     }
+}
+
+/// Split a markdown/raw source into its frontmatter map and body. Shared by
+/// `Doc::parse` and `Doc::load` so the merge of config defaults can slot
+/// between the split and `Doc::new`.
+fn split_markdown(source: &str) -> Result<(Mapping, String)> {
+    let (data, body) = frontmatter::parse(source)?;
+    Ok((data, body.to_string()))
+}
+
+/// Split a `.yaml` source into its data map and body. The whole file is the
+/// data map; the `content` field (string, if present) becomes the body.
+/// Shared by `Doc::parse_yaml` and `Doc::load`.
+fn split_yaml(source: &str) -> Result<(Mapping, String)> {
+    let data = frontmatter::parse_yaml(source)?;
+    let content = data
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+    Ok((data, content))
 }
 
 fn resolve_output_path(id_path: &Path, data: &Mapping, date: &DateTime<Utc>) -> PathBuf {
@@ -349,7 +370,7 @@ mod tests {
         let mut f = fs::File::create(&path).unwrap();
         writeln!(f, "---\ndate: 2025-10-31\n---\nbody").unwrap();
         drop(f);
-        let d = Doc::load(&dir, Path::new("post.md")).unwrap();
+        let d = Doc::load(&dir, Path::new("post.md"), &Defaults::default()).unwrap();
         assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -408,7 +429,7 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("doc.yaml");
         fs::write(&path, "title: From YAML\ncontent: \"<p>hi</p>\"\n").unwrap();
-        let d = Doc::load(&dir, Path::new("doc.yaml")).unwrap();
+        let d = Doc::load(&dir, Path::new("doc.yaml"), &Defaults::default()).unwrap();
         assert_eq!(d.title, "From YAML");
         assert_eq!(d.content, "<p>hi</p>");
         let _ = fs::remove_dir_all(&dir);
@@ -419,11 +440,49 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("post.md");
         fs::write(&path, "# Hello\n").unwrap();
-        let d = Doc::load(&dir, Path::new("post.md")).unwrap();
+        let d = Doc::load(&dir, Path::new("post.md"), &Defaults::default()).unwrap();
         // No frontmatter date — should pick up something more recent than the epoch
         // from the just-created file's metadata.
         assert!(d.date > DateTime::<Utc>::UNIX_EPOCH);
         assert!(d.updated > DateTime::<Utc>::UNIX_EPOCH);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn defaults(s: &str) -> Defaults {
+        Defaults::from_yaml_mapping(&serde_yaml_ng::from_str(s).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn load_applies_default_permalink_when_absent() {
+        let dir = tempdir();
+        fs::create_dir_all(dir.join("posts")).unwrap();
+        fs::write(dir.join("posts/hello.md"), "---\ndate: 2025-03-07\n---\nbody").unwrap();
+        let d = Doc::load(
+            &dir,
+            Path::new("posts/hello.md"),
+            &defaults("\"posts/*.md\":\n  permalink: \":yyyy/:mm/:dd/:slug/\"\n"),
+        )
+        .unwrap();
+        assert_eq!(d.output_path, PathBuf::from("2025/03/07/hello/index.html"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_frontmatter_permalink_wins_over_default() {
+        let dir = tempdir();
+        fs::create_dir_all(dir.join("posts")).unwrap();
+        fs::write(
+            dir.join("posts/hello.md"),
+            "---\npermalink: /custom/\n---\nbody",
+        )
+        .unwrap();
+        let d = Doc::load(
+            &dir,
+            Path::new("posts/hello.md"),
+            &defaults("\"posts/*.md\":\n  permalink: \":slug\"\n"),
+        )
+        .unwrap();
+        assert_eq!(d.output_path, PathBuf::from("custom/index.html"));
         let _ = fs::remove_dir_all(&dir);
     }
 

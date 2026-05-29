@@ -2,6 +2,7 @@ pub mod backlinks;
 pub mod build;
 pub mod command;
 pub mod config;
+pub mod defaults;
 pub mod doc;
 pub mod frontmatter;
 pub mod html;

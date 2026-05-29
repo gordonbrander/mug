@@ -1,10 +1,12 @@
 # mug
 
-A zero-config static site generator written in Rust. Every site-specific
-behavior lives in `config.yaml`, frontmatter, and [Tera] templates — never in
-code or scripts.
+Mug is a fast, reliable site-generator, written in Rust. Its goals are:
 
-[Tera]: https://keats.github.io/tera/
+- Blog-aware: date-based posts and archives.
+- Wiki-aware: Supports Obsidian Markdown, wikilinks, and backlinks. Use it to publish your digital garden.
+- Zero config: Works out-of-the-box with sensible defaults.
+- Reliable: no framework churn, no dependencies, does one thing well.
+- Fast: it's Rust!
 
 ## Install
 
@@ -79,35 +81,101 @@ Recognized frontmatter keys (all optional):
 Any other key is preserved verbatim on `doc.data` and reachable from templates
 as `{{ doc.data.your_key }}`.
 
+## Site config (`config.yaml`)
+
+Site-wide configuration goes in `config.yaml`. All keys are optional and come with sensible defaults.
+
+```yaml
+content_dir: content
+output_dir: public
+templates_dir: templates
+static_dir: static
+data_dir: data
+generators_dir: generators
+
+site:
+  # Anything under `site:` is reachable in templates as `{{ site.x }}`.
+  title: My Site
+  description: A site built with mug.
+  url: https://example.com   # origin for absolute URLs; no trailing slash
+  base_path: ""              # subpath the site is hosted under, e.g. "/blog"
+
+# Add default frontmatter to matching pages
+# Defaults can be overridden on a per-page basis
+defaults:
+  "posts/*.md":
+    permalink: /blog/:yyyy/:mm/:dd/:slug/
+    template: post.html
+```
+
 ## Permalinks
 
-By default a document renders to a location mirroring its source path. The
-`permalink` frontmatter key overrides this with a path template expanded
-against:
-
-- `:slug` — sluggified stem of the document
-- `:yyyy`, `:mm`, `:dd` — components of `date`
-- `:page` — page number (generators with pagination only)
-
-A trailing `/` writes `index.html`:
+By default a document renders to a location mirroring its source path. You can
+override this by setting a `permalink` frontmatter key
+(or by setting permalink defaults in your `config.yaml`).
 
 ```yaml
 permalink: /blog/:yyyy/:slug/   # → /blog/2026/hello/index.html
 ```
 
+(A trailing `/` writes `index.html`)
+
+Available permalink variables:
+
+- `:slug` — sluggified stem of the document
+- `:yyyy`: year
+- `:mm`: two-digit month
+- `:dd`: two-digit day
+- `:page` — page number (generators with pagination only)
+
+## Defaults
+
+Rather than repeat the same frontmatter in every file, declare per-glob
+defaults in `config.yaml` under a `defaults:` key. Each entry maps a path glob
+to frontmatter values that fill keys a document didn't set itself:
+
+```yaml
+defaults:
+  "posts/*.md":
+    permalink: /blog/:yyyy/:mm/:dd/:slug/
+    template: post.html
+```
+
+With the above, every `content/posts/*.md` gets a dated permalink and the
+`post.html` layout without restating either in its frontmatter. This is a
+general mechanism — any frontmatter key can be defaulted, not just
+`permalink`.
+
+Rules:
+
+- **A document's own frontmatter always wins.** Defaults only fill keys the
+  document left unset.
+- **When several globs match, later entries win.** List broad globs first and
+  more specific ones after.
+- Globs use the same matching as `query` — `*` does not cross `/`; use `**` to
+  recurse (e.g. `posts/**/*.md`).
+
+Defaults are applied during the read phase, before permalinks are expanded and
+before bodies are rendered, so they behave exactly as if written inline.
+
 ## Templates
 
-Templates live in `templates/` and use [Tera]. A document picks one with
-`template: name.html` in its frontmatter.
+Templates live in `templates/` and use [Tera](https://keats.github.io/tera/docs/), a
+Jinja-style templating system. Set a template with the `template` frontmatter key
+(or via defaults in `config.yaml`):
+
+```yaml
+template: post.html
+```
 
 Inside a template, the available context is:
 
-- `doc` — the current document (`doc.title`, `doc.tags`, `doc.date`, …, plus
-  `doc.data` for arbitrary frontmatter)
-- `page.content` — the document's rendered body
-- `site` — the `site:` submap from `config.yaml`
-- `data` — every top-level YAML file in `data/`, keyed by filename stem
-- `pagination` — only on generator-emitted pages (see below)
+- `doc`: the current document (`doc.title`, `doc.tags`, `doc.date`, …, plus
+  `doc.data` for full frontmatter)
+- `page.content`: the document's rendered body
+- `site`: the `site:` submap from `config.yaml`
+- `data`: every top-level YAML file in `data/`, keyed by filename stem
+- `pagination`: (only on generator-emitted pages—see below)
 
 Example `templates/base.html`:
 
@@ -121,12 +189,11 @@ Example `templates/base.html`:
 </html>
 ```
 
-## Filters and functions
+## Template filters and functions
 
-### `query(...)` — list documents
+### `query(...)` — query over documents
 
-Iterate over the in-memory index. Available in **templates only**, not in
-document bodies.
+You can list posts in a template using `query` (available in **templates**).
 
 ```jinja
 {% for post in query(path="posts/*.md", order_by="date", sort="desc", limit=10) %}
@@ -227,26 +294,6 @@ weight: 9999
 
 The scaffold ships starter RSS and sitemap generators that work out of the
 box.
-
-## `config.yaml`
-
-All keys are optional. Defaults shown:
-
-```yaml
-content_dir: content
-output_dir: public
-templates_dir: templates
-static_dir: static
-data_dir: data
-generators_dir: generators
-
-site:
-  # Anything under `site:` is reachable in templates as `{{ site.x }}`.
-  title: My Site
-  description: A site built with mug.
-  url: https://example.com   # origin for absolute URLs; no trailing slash
-  base_path: ""              # subpath the site is hosted under, e.g. "/blog"
-```
 
 ## CLI
 

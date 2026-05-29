@@ -1,3 +1,4 @@
+use crate::defaults::Defaults;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Value};
@@ -23,6 +24,11 @@ pub struct Config {
     /// with `/`.
     #[serde(skip)]
     pub base_path: String,
+    /// Glob-scoped default frontmatter from the `defaults:` key. Merged into
+    /// each authored doc's frontmatter during the read phase, before fields
+    /// are uplifted and the permalink is expanded.
+    #[serde(skip)]
+    pub defaults: Defaults,
 }
 
 impl Default for Config {
@@ -36,6 +42,7 @@ impl Default for Config {
             generators_dir: PathBuf::from("generators"),
             site_url: None,
             base_path: String::new(),
+            defaults: Defaults::default(),
         }
     }
 }
@@ -55,13 +62,24 @@ impl Config {
             .with_context(|| format!("parsing {} into Config", path.display()))?;
         let raw: Value = serde_yaml_ng::from_str(&source)
             .with_context(|| format!("parsing {} as YAML", path.display()))?;
-        let site = match raw {
-            Value::Mapping(mut m) => match m.remove(Value::String("site".into())) {
-                Some(Value::Mapping(s)) => s,
-                _ => Mapping::new(),
-            },
-            _ => Mapping::new(),
+        let (site, defaults_map) = match raw {
+            Value::Mapping(mut m) => {
+                let site = match m.remove(Value::String("site".into())) {
+                    Some(Value::Mapping(s)) => s,
+                    _ => Mapping::new(),
+                };
+                let defaults = match m.remove(Value::String("defaults".into())) {
+                    Some(Value::Mapping(d)) => Some(d),
+                    _ => None,
+                };
+                (site, defaults)
+            }
+            _ => (Mapping::new(), None),
         };
+        if let Some(map) = defaults_map {
+            config.defaults = Defaults::from_yaml_mapping(&map)
+                .with_context(|| format!("parsing `defaults` in {}", path.display()))?;
+        }
         config.site_url = site
             .get(Value::String("url".into()))
             .and_then(|v| v.as_str())
@@ -200,6 +218,35 @@ mod tests {
         let (config, _) = Config::load(&path).unwrap();
         assert!(config.site_url.is_none());
         assert_eq!(config.base_path, "");
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn defaults_block_is_parsed() {
+        let dir = tempdir();
+        let path = write_config(
+            &dir,
+            "defaults:\n  \"posts/*.md\":\n    permalink: \":yyyy/:mm/:dd/:slug\"\n",
+        );
+        let (config, _) = Config::load(&path).unwrap();
+        let mut data = Mapping::new();
+        // A matching glob fills the default permalink.
+        assert!(config.defaults.apply(Path::new("posts/hello.md"), &mut data));
+        assert_eq!(
+            data.get(Value::String("permalink".into()))
+                .and_then(|v| v.as_str()),
+            Some(":yyyy/:mm/:dd/:slug")
+        );
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn defaults_absent_yields_empty() {
+        let dir = tempdir();
+        let path = write_config(&dir, "content_dir: foo\n");
+        let (config, _) = Config::load(&path).unwrap();
+        let mut data = Mapping::new();
+        assert!(!config.defaults.apply(Path::new("posts/hello.md"), &mut data));
         cleanup(&dir);
     }
 
