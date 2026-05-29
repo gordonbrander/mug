@@ -2,7 +2,27 @@ use crate::doc::{Doc, DocMeta};
 use crate::html;
 use crate::permalink;
 use comrak::nodes::{AstNode, NodeValue};
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+
+/// Group docs by the slugified file-stem of their `id_path` — the key a
+/// wikilink target is matched against (spec §8). Built once per markup env so
+/// each `resolve` is a hash lookup over a small candidate set rather than a
+/// full re-slugifying scan of every doc (was O(N²·W) over a build). The key
+/// derivation mirrors `resolve`'s candidate filter exactly, including the
+/// `unwrap_or("")` fallback, so grouping is behavior-preserving.
+pub fn build_stem_index(docs: &[DocMeta]) -> HashMap<String, Vec<DocMeta>> {
+    let mut index: HashMap<String, Vec<DocMeta>> = HashMap::new();
+    for doc in docs {
+        let stem = doc
+            .id_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        index.entry(slug::slugify(stem)).or_default().push(doc.clone());
+    }
+    index
+}
 
 /// Resolve `[[Wiki Link]]` / `[[Wiki Link|Display]]` nodes in a parsed comrak
 /// AST, in place. comrak tokenizes the `[[…]]` syntax (the
@@ -27,7 +47,11 @@ use std::path::{Component, Path, PathBuf};
 /// `id_path`. An optional path prefix `[[dir/sub/Name]]` (anchored at the
 /// vault root, slugified componentwise) restricts the candidate set to docs
 /// whose parent directory matches that prefix exactly.
-pub fn resolve_in_ast<'a>(root: &'a AstNode<'a>, source: &Doc, docs: &[DocMeta]) -> Vec<PathBuf> {
+pub fn resolve_in_ast<'a>(
+    root: &'a AstNode<'a>,
+    source: &Doc,
+    stem_index: &HashMap<String, Vec<DocMeta>>,
+) -> Vec<PathBuf> {
     let mut outlinks: Vec<PathBuf> = Vec::new();
 
     // Collect first, then mutate: detaching a node's children mid-traversal
@@ -44,7 +68,7 @@ pub fn resolve_in_ast<'a>(root: &'a AstNode<'a>, source: &Doc, docs: &[DocMeta])
         };
         let display = node_text(node);
 
-        let replacement = match resolve(&target, &source.id_path, docs) {
+        let replacement = match resolve(&target, &source.id_path, stem_index) {
             Some(doc) => {
                 let url = permalink::to_url(&doc.output_path);
                 if !outlinks.contains(&doc.id_path) {
@@ -148,7 +172,11 @@ fn prefix_matches(parent: &Path, prefix: &str) -> bool {
 /// with the smallest directory distance from the source. Ties are broken
 /// by the lexicographically smallest `id_path` so output is deterministic
 /// across runs and platforms.
-fn resolve<'a>(target: &str, source_id_path: &Path, docs: &'a [DocMeta]) -> Option<&'a DocMeta> {
+fn resolve<'a>(
+    target: &str,
+    source_id_path: &Path,
+    stem_index: &'a HashMap<String, Vec<DocMeta>>,
+) -> Option<&'a DocMeta> {
     let (prefix, stem) = split_prefix_stem(target);
     let stem_slug = slug::slugify(stem);
     if stem_slug.is_empty() {
@@ -157,16 +185,12 @@ fn resolve<'a>(target: &str, source_id_path: &Path, docs: &'a [DocMeta]) -> Opti
     let empty = Path::new("");
     let source_dir = source_id_path.parent().unwrap_or(empty);
 
+    // Candidates are pre-grouped by slugified stem, so the old per-doc stem
+    // re-slugify-and-compare is already done — only the prefix/distance/lexical
+    // tiebreak remains, over just the matching group.
+    let candidates = stem_index.get(&stem_slug)?;
     let mut best: Option<(&DocMeta, usize)> = None;
-    for doc in docs {
-        let cand_stem = doc
-            .id_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        if slug::slugify(cand_stem) != stem_slug {
-            continue;
-        }
+    for doc in candidates {
         let cand_dir = doc.id_path.parent().unwrap_or(empty);
         if let Some(p) = prefix {
             if !prefix_matches(cand_dir, p) {
@@ -212,6 +236,13 @@ mod tests {
         DocMeta::from(&d)
     }
 
+    /// Build the stem index from `docs` and resolve `target`, returning the
+    /// winning candidate's `id_path` (the only field these tests assert on).
+    fn resolve_id(target: &str, source_id: &Path, docs: &[DocMeta]) -> Option<PathBuf> {
+        let idx = build_stem_index(docs);
+        resolve(target, source_id, &idx).map(|d| d.id_path.clone())
+    }
+
     /// Parse `body` as Markdown with the wikilink extension, resolve wikilinks
     /// on the AST, and render to HTML — the same path `markup::render` drives.
     fn render_md(body: &str, source: &Doc, docs: &[DocMeta]) -> (String, Vec<PathBuf>) {
@@ -220,7 +251,8 @@ mod tests {
         options.render.r#unsafe = true;
         options.extension.wikilinks_title_after_pipe = true;
         let root = comrak::parse_document(&arena, body, &options);
-        let outlinks = resolve_in_ast(root, source, docs);
+        let stem_index = build_stem_index(docs);
+        let outlinks = resolve_in_ast(root, source, &stem_index);
         let mut out = String::new();
         comrak::format_html(root, &options, &mut out).unwrap();
         (out, outlinks)
@@ -337,23 +369,23 @@ mod tests {
             doc_at("hello.md"),      // parent-dir candidate
             doc_at("blog/hello.md"), // same-dir candidate (should win)
         ];
-        let hit = resolve("hello", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("blog/hello.md"));
+        let hit = resolve_id("hello", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("blog/hello.md"));
     }
 
     #[test]
     fn resolve_slugifies_target() {
         let source = doc_at("a.md");
         let docs = vec![doc_at("hello-world.md")];
-        let hit = resolve("Hello World", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("hello-world.md"));
+        let hit = resolve_id("Hello World", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("hello-world.md"));
     }
 
     #[test]
     fn resolve_returns_none_when_no_match() {
         let source = doc_at("a.md");
         let docs = vec![doc_at("other.md")];
-        assert!(resolve("missing", &source.id_path, &docs).is_none());
+        assert!(resolve_id("missing", &source.id_path, &docs).is_none());
     }
 
     #[test]
@@ -362,8 +394,8 @@ mod tests {
         // subtree does — the global lookup must find it.
         let source = doc_at("blog/2025/post.md");
         let docs = vec![doc_at("reference/glossary.md")];
-        let hit = resolve("Glossary", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("reference/glossary.md"));
+        let hit = resolve_id("Glossary", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("reference/glossary.md"));
     }
 
     #[test]
@@ -373,8 +405,8 @@ mod tests {
         // (dist 3) from blog/2025/post.md.
         let source = doc_at("blog/2025/post.md");
         let docs = vec![doc_at("reference/glossary.md"), doc_at("blog/glossary.md")];
-        let hit = resolve("Glossary", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("blog/glossary.md"));
+        let hit = resolve_id("Glossary", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("blog/glossary.md"));
     }
 
     #[test]
@@ -383,8 +415,8 @@ mod tests {
         // smaller id_path for determinism.
         let source = doc_at("root.md");
         let docs = vec![doc_at("zeta/glossary.md"), doc_at("alpha/glossary.md")];
-        let hit = resolve("Glossary", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("alpha/glossary.md"));
+        let hit = resolve_id("Glossary", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("alpha/glossary.md"));
     }
 
     #[test]
@@ -393,8 +425,8 @@ mod tests {
         // resolve only to the prefix-matching candidate.
         let source = doc_at("blog/2025/post.md");
         let docs = vec![doc_at("blog/glossary.md"), doc_at("reference/glossary.md")];
-        let hit = resolve("reference/Glossary", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("reference/glossary.md"));
+        let hit = resolve_id("reference/Glossary", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("reference/glossary.md"));
     }
 
     #[test]
@@ -403,7 +435,7 @@ mod tests {
         // the root — explicit prefixes are absolute.
         let source = doc_at("a.md");
         let docs = vec![doc_at("hello.md")];
-        assert!(resolve("missing/Hello", &source.id_path, &docs).is_none());
+        assert!(resolve_id("missing/Hello", &source.id_path, &docs).is_none());
     }
 
     #[test]
@@ -412,8 +444,8 @@ mod tests {
         // candidate directory of the same slug.
         let source = doc_at("a.md");
         let docs = vec![doc_at("blog-posts/hello.md")];
-        let hit = resolve("Blog Posts/Hello", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("blog-posts/hello.md"));
+        let hit = resolve_id("Blog Posts/Hello", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("blog-posts/hello.md"));
     }
 
     #[test]
@@ -422,8 +454,8 @@ mod tests {
         // root-level doc, not a nested one.
         let source = doc_at("blog/post.md");
         let docs = vec![doc_at("blog/hello.md"), doc_at("hello.md")];
-        let hit = resolve("/Hello", &source.id_path, &docs).unwrap();
-        assert_eq!(hit.id_path, PathBuf::from("hello.md"));
+        let hit = resolve_id("/Hello", &source.id_path, &docs).unwrap();
+        assert_eq!(hit, PathBuf::from("hello.md"));
     }
 
     #[test]

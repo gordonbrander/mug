@@ -26,3 +26,7 @@ bytes = "1"
 
 [dev-dependencies]
 insta = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

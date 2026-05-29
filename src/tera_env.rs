@@ -14,12 +14,22 @@ mod query;
 mod text;
 mod url;
 
+use crate::build::markup::wikilink::build_stem_index;
 use crate::config::Config;
 use crate::doc::{Doc, DocMeta};
 use anyhow::{Context, Result};
 use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 use tera::Tera;
+
+/// Process-wide syntect adapter. Loading the default syntax + theme sets is
+/// non-trivial, so build it once and share it across every markup env (and
+/// across `watch`/`serve` rebuilds) rather than rebuilding per
+/// `build_markup_env` call.
+static SYNTECT: LazyLock<Arc<SyntectAdapter>> = LazyLock::new(|| {
+    Arc::new(SyntectAdapterBuilder::new().theme("InspiredGitHub").build())
+});
 
 /// Markup-phase Tera env paired with the auto-import preamble for
 /// `templates/macros/*.html` (Phase 11) and the comrak config used to render
@@ -32,7 +42,10 @@ pub struct MarkupEnv {
     pub tera: Tera,
     pub macro_preamble: String,
     pub options: comrak::Options<'static>,
-    pub syntect: SyntectAdapter,
+    pub syntect: Arc<SyntectAdapter>,
+    /// Slugified file-stem → candidate docs, built once from the snapshot so
+    /// wikilink resolution is a hash lookup rather than a full scan per link.
+    pub stem_index: HashMap<String, Vec<DocMeta>>,
 }
 
 /// comrak options for the markup phase. `unsafe_` passes raw HTML through (Tera
@@ -57,6 +70,8 @@ fn markup_options() -> comrak::Options<'static> {
 /// because the index is not yet meaningful at body-render time (spec §11).
 pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<MarkupEnv> {
     let mut tera = load_templates(config)?;
+    // Build the stem index before `docs` is moved into the URL filters.
+    let stem_index = build_stem_index(&docs);
     url::register(&mut tera, docs, config.site_url.clone(), config.base_path.clone());
     text::register(&mut tera);
     let macro_preamble = macros::discover_imports(config);
@@ -64,9 +79,8 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
         tera,
         macro_preamble,
         options: markup_options(),
-        syntect: SyntectAdapterBuilder::new()
-            .theme("InspiredGitHub")
-            .build(),
+        syntect: SYNTECT.clone(),
+        stem_index,
     })
 }
 
