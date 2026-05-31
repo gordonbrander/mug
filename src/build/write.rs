@@ -1,10 +1,10 @@
 use crate::config::Config;
-use crate::index::Index;
+use crate::doc_index::DocIndex;
 use anyhow::{Context, Result};
 use std::fs;
 
-pub fn run(config: &Config, index: &Index) -> Result<()> {
-    for doc in &index.docs {
+pub fn run(config: &Config, index: &DocIndex) -> Result<()> {
+    for doc in index.docs() {
         let out_path = config.output_dir.join(&doc.output_path);
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)

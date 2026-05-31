@@ -2,7 +2,7 @@
 //! `backlinks::list_backlinks`, serializes the result.
 
 use crate::backlinks::{self, Backlinks};
-use crate::doc::Doc;
+use crate::doc_index::DocIndex;
 use crate::query::{OrderKey, SortDir};
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,8 +15,8 @@ const KNOWN_KEYS: &[&str] = &["order_by", "sort", "omit"];
 /// `{{ doc.id_path | backlinks(order_by="title", sort="asc") }}`. The piped
 /// value is the target doc's `id_path`; returns a list of docs whose
 /// `links` contain it. Template-env only — spec §11 forbids index-listing
-/// filters in the markup env.
-pub fn register(env: &mut Tera, docs: Arc<Vec<Doc>>) {
+/// filters in the markup env. Reads through the shared [`DocIndex`].
+pub fn register(env: &mut Tera, index: Arc<DocIndex>) {
     env.register_filter(
         "backlinks",
         move |value: &Value, args: &HashMap<String, Value>| -> tera::Result<Value> {
@@ -25,7 +25,7 @@ pub fn register(env: &mut Tera, docs: Arc<Vec<Doc>>) {
             })?;
             let target = Path::new(id_path_str);
             let b = from_kwargs(args)?;
-            let results = backlinks::list_backlinks(docs.as_slice(), target, &b);
+            let results = backlinks::list_backlinks(index.docs(), target, &b);
             tera::to_value(results).map_err(tera::Error::from)
         },
     );

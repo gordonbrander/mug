@@ -18,6 +18,7 @@ pub enum SortDir {
     Desc,
 }
 
+#[derive(Debug, Clone)]
 pub struct Query {
     pub path: Option<Glob>,
     pub tag: Option<String>,
@@ -146,15 +147,16 @@ impl Query {
     }
 }
 
-/// Linear scan over `docs`: filter, sort, then truncate. No secondary indexes —
-/// the spec §11 "fully populated before listing" invariant is what makes this
-/// correct, not the data structure.
-pub fn evaluate<'a>(q: &Query, docs: &'a [Doc]) -> Vec<&'a Doc> {
+/// Linear scan over `docs`: filter, sort, then truncate. Accepts any `&Doc`
+/// iterator (a `&[Doc]` slice or `DocIndex`'s `HashMap` values), so there are no
+/// secondary indexes — the spec §11 "fully populated before listing" invariant
+/// is what makes this correct, not the data structure.
+pub fn evaluate<'a>(q: &Query, docs: impl IntoIterator<Item = &'a Doc>) -> Vec<&'a Doc> {
     let matcher: Option<GlobMatcher> = q.path.as_ref().map(Glob::compile_matcher);
     let omit: HashSet<&Path> = q.omit.iter().map(PathBuf::as_path).collect();
 
     let mut results: Vec<&Doc> = docs
-        .iter()
+        .into_iter()
         .filter(|d| {
             if let Some(m) = &matcher {
                 if !m.is_match(&d.id_path) {
@@ -181,10 +183,15 @@ pub fn evaluate<'a>(q: &Query, docs: &'a [Doc]) -> Vec<&'a Doc> {
             OrderKey::Date => a.date.cmp(&b.date),
             OrderKey::Updated => a.updated.cmp(&b.updated),
         };
-        match q.sort {
+        let cmp = match q.sort {
             SortDir::Asc => cmp,
             SortDir::Desc => cmp.reverse(),
-        }
+        };
+        // Stable tiebreak on `id_path` for a total order regardless of input
+        // order. `DocIndex` already yields docs sorted by `id_path`, but the
+        // generator path passes a `Vec` in filesystem-walk order, so without
+        // this two docs with equal sort keys could swap between runs/machines.
+        cmp.then_with(|| a.id_path.cmp(&b.id_path))
     });
 
     if let Some(n) = q.limit {

@@ -1,4 +1,5 @@
 use crate::defaults::Defaults;
+use crate::query::Query;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Value};
@@ -34,6 +35,12 @@ pub struct Config {
     /// are uplifted and the permalink is expanded.
     #[serde(skip)]
     pub defaults: Defaults,
+    /// Named queries from the `collections:` key, each a [`Query`]. The template
+    /// phase evaluates them once into the `DocIndex` so templates can read them
+    /// cheaply via the `collection()` function. Insertion order is the
+    /// `config.yaml` order; collection lookup is by name regardless.
+    #[serde(skip)]
+    pub collections: Vec<(String, Query)>,
 }
 
 impl Default for Config {
@@ -49,6 +56,7 @@ impl Default for Config {
             site_url: None,
             base_path: String::new(),
             defaults: Defaults::default(),
+            collections: Vec::new(),
         }
     }
 }
@@ -68,7 +76,7 @@ impl Config {
             .with_context(|| format!("parsing {} into Config", path.display()))?;
         let raw: Value = serde_yaml_ng::from_str(&source)
             .with_context(|| format!("parsing {} as YAML", path.display()))?;
-        let (site, defaults_map) = match raw {
+        let (site, defaults_map, collections_map) = match raw {
             Value::Mapping(mut m) => {
                 let site = match m.remove(Value::String("site".into())) {
                     Some(Value::Mapping(s)) => s,
@@ -78,13 +86,21 @@ impl Config {
                     Some(Value::Mapping(d)) => Some(d),
                     _ => None,
                 };
-                (site, defaults)
+                let collections = match m.remove(Value::String("collections".into())) {
+                    Some(Value::Mapping(c)) => Some(c),
+                    _ => None,
+                };
+                (site, defaults, collections)
             }
-            _ => (Mapping::new(), None),
+            _ => (Mapping::new(), None, None),
         };
         if let Some(map) = defaults_map {
             config.defaults = Defaults::from_yaml_mapping(&map)
                 .with_context(|| format!("parsing `defaults` in {}", path.display()))?;
+        }
+        if let Some(map) = collections_map {
+            config.collections = parse_collections(&map)
+                .with_context(|| format!("parsing `collections` in {}", path.display()))?;
         }
         config.site_url = site
             .get(Value::String("url".into()))
@@ -97,6 +113,26 @@ impl Config {
             .unwrap_or_default();
         Ok((config, site))
     }
+}
+
+/// Parse the `collections:` mapping into named [`Query`]s, preserving
+/// `config.yaml` order. Each value is a query sub-mapping validated by
+/// [`Query::from_yaml_mapping`] (same key validation as generator `query:`
+/// blocks and the old `query()` function).
+fn parse_collections(map: &Mapping) -> Result<Vec<(String, Query)>> {
+    let mut collections = Vec::with_capacity(map.len());
+    for (key, value) in map {
+        let name = key
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("collection names must be strings"))?;
+        let query_map = value.as_mapping().ok_or_else(|| {
+            anyhow::anyhow!("collection `{}` must be a mapping of query options", name)
+        })?;
+        let query = Query::from_yaml_mapping(query_map)
+            .with_context(|| format!("in collection `{}`", name))?;
+        collections.push((name.to_string(), query));
+    }
+    Ok(collections)
 }
 
 fn normalize_site_url(s: &str) -> Option<String> {
@@ -243,6 +279,40 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some(":yyyy/:mm/:dd/:slug")
         );
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn collections_block_is_parsed() {
+        let dir = tempdir();
+        let path = write_config(
+            &dir,
+            "collections:\n  posts:\n    path: \"posts/*.md\"\n    limit: 5\n  recent:\n    order_by: updated\n",
+        );
+        let (config, _) = Config::load(&path).unwrap();
+        let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
+        // Order preserved from config.yaml.
+        assert_eq!(names, vec!["posts", "recent"]);
+        let posts = &config.collections[0].1;
+        assert!(posts.path.is_some());
+        assert_eq!(posts.limit, Some(5));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn collections_absent_yields_empty() {
+        let dir = tempdir();
+        let path = write_config(&dir, "content_dir: foo\n");
+        let (config, _) = Config::load(&path).unwrap();
+        assert!(config.collections.is_empty());
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn collections_unknown_query_key_errors() {
+        let dir = tempdir();
+        let path = write_config(&dir, "collections:\n  bad:\n    paht: x\n");
+        assert!(Config::load(&path).is_err());
         cleanup(&dir);
     }
 

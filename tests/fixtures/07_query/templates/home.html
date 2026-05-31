@@ -1,1 +1,1 @@
-<ul>{% for p in query(path="posts/*.md") %}<li>{{ p.title }}</li>{% endfor %}</ul>
+<ul>{% for p in collection(name="posts") %}<li>{{ p.title }}</li>{% endfor %}</ul>

@@ -12,3 +12,19 @@ site:
 # defaults:
 #   "posts/*.md":
 #     permalink: ":yyyy/:mm/:dd/:slug"
+
+# Named collections: queries evaluated once and cached for cheap template access.
+# Read them with `{% for p in collection(name="posts") %}`. Each takes the same
+# options as a generator query: path (glob), tag, order_by (title|date|updated),
+# sort (asc|desc), limit, omit.
+# collections:
+#   posts:
+#     path: "posts/*.md"
+#     order_by: date
+#     sort: desc
+#   recent:
+#     path: "posts/*.md"
+#     limit: 5
+#
+# Tags are exposed as a group keyed by tag slug:
+# `{% for tag, docs in group(name="tags") %}`.

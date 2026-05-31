@@ -3,20 +3,22 @@
 //! `tera_env/` hold the adapters that bridge pure domain logic (`query`,
 //! `backlinks`, `permalink`, `html`) to Tera's filter/function API.
 //!
-//! Spec §11: the markup env intentionally omits index-listing filters
-//! (`query`, `backlinks`) because the index is not yet meaningful at
-//! body-render time. URL filters and text filters ship on both envs — they
+//! Spec §11: the markup env intentionally omits index-listing functions
+//! (`collection`, `group`, `backlinks`) because the index is not yet meaningful
+//! at body-render time. URL filters and text filters ship on both envs — they
 //! are 1:1 lookups or string composition, not listings.
 
 mod backlinks;
+mod collection;
+mod group;
 mod macros;
-mod query;
 mod text;
 mod url;
 
 use crate::build::markup::wikilink::build_stem_index;
 use crate::config::Config;
-use crate::doc::{Doc, DocMeta};
+use crate::doc::DocMeta;
+use crate::doc_index::DocIndex;
 use anyhow::{Context, Result};
 use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
 use std::collections::HashMap;
@@ -76,7 +78,12 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     let mut tera = load_templates(config)?;
     // Build the stem index before `docs` is moved into the URL filters.
     let stem_index = build_stem_index(&docs);
-    url::register(&mut tera, docs, config.site_url.clone(), config.base_path.clone());
+    url::register(
+        &mut tera,
+        url::lookup_from_metas(docs),
+        config.site_url.clone(),
+        config.base_path.clone(),
+    );
     text::register(&mut tera);
     let macro_preamble = macros::discover_imports(config);
     Ok(MarkupEnv {
@@ -89,21 +96,20 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     })
 }
 
-/// Tera environment used by the template phase. The full filter set lands
-/// here. `docs` is a frozen snapshot of the index taken at the start of the
-/// template phase — closures registered here borrow from it for the rest of
-/// the build.
-pub fn build_template_env(config: &Config, docs: Arc<Vec<Doc>>) -> Result<Tera> {
+/// Tera environment used by the template phase. The full function set lands
+/// here. `index` is a frozen [`DocIndex`] snapshot taken at the start of the
+/// template phase (with collections and groups already defined) — every adapter
+/// shares the same `Arc`, so there is no per-function clone of the docs.
+pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera> {
     let mut env = load_templates(config)?;
-    query::register(&mut env, docs.clone());
-    backlinks::register(&mut env, docs.clone());
-    // URL filters only ever read `id_path`/`output_path` — project to the
-    // narrower `DocMeta` view to share one filter implementation with the
-    // markup env.
-    let url_docs: Arc<Vec<DocMeta>> = Arc::new(docs.iter().map(DocMeta::from).collect());
+    collection::register(&mut env, index.clone());
+    group::register(&mut env, index.clone());
+    backlinks::register(&mut env, index.clone());
+    // URL filters resolve `id_path` -> URL through the shared `DocIndex` (O(1)),
+    // not a cloned `DocMeta` vec.
     url::register(
         &mut env,
-        url_docs,
+        url::lookup_from_index(index),
         config.site_url.clone(),
         config.base_path.clone(),
     );
@@ -122,6 +128,7 @@ fn load_templates(config: &Config) -> Result<Tera> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::doc::Doc;
     use std::path::PathBuf;
 
     fn cfg_without_templates() -> Config {
@@ -140,8 +147,8 @@ mod tests {
         }
     }
 
-    fn empty_snapshot() -> Arc<Vec<Doc>> {
-        Arc::new(Vec::new())
+    fn empty_snapshot() -> Arc<DocIndex> {
+        Arc::new(DocIndex::new())
     }
 
     fn empty_meta_snapshot() -> Arc<Vec<DocMeta>> {
@@ -149,11 +156,26 @@ mod tests {
     }
 
     #[test]
-    fn markup_env_does_not_register_query() {
-        // Guards spec §11: `query` must never be callable from the markup env.
+    fn markup_env_does_not_register_collection() {
+        // Guards spec §11: `collection` must never be callable from the markup env.
         let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let ctx = tera::Context::new();
-        assert!(env.tera.render_str("{{ query() }}", &ctx).is_err());
+        assert!(
+            env.tera
+                .render_str("{{ collection(name=\"posts\") }}", &ctx)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn markup_env_does_not_register_group() {
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        let ctx = tera::Context::new();
+        assert!(
+            env.tera
+                .render_str("{{ group(name=\"tags\") }}", &ctx)
+                .is_err()
+        );
     }
 
     #[test]
@@ -180,11 +202,21 @@ mod tests {
     }
 
     #[test]
-    fn template_env_registers_query() {
-        let env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
-        let mut env = env;
+    fn template_env_registers_collection() {
+        let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        // Unknown/empty collection renders an empty list (no error).
         let out = env
-            .render_str("{{ query() | length }}", &tera::Context::new())
+            .render_str("{{ collection(name=\"posts\") | length }}", &tera::Context::new())
+            .unwrap();
+        assert_eq!(out, "0");
+    }
+
+    #[test]
+    fn template_env_registers_group() {
+        let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        // Unknown group renders an empty map (no error).
+        let out = env
+            .render_str("{{ group(name=\"tags\") | length }}", &tera::Context::new())
             .unwrap();
         assert_eq!(out, "0");
     }
@@ -202,15 +234,21 @@ mod tests {
         assert_eq!(out, "0");
     }
 
-    fn one_doc_snapshot() -> Arc<Vec<Doc>> {
+    fn one_doc() -> Doc {
         let mut d = Doc::default();
         d.id_path = PathBuf::from("posts/hello.md");
         d.output_path = PathBuf::from("posts/hello.html");
-        Arc::new(vec![d])
+        d
+    }
+
+    fn one_doc_snapshot() -> Arc<DocIndex> {
+        let mut idx = DocIndex::new();
+        idx.insert(one_doc());
+        Arc::new(idx)
     }
 
     fn one_doc_meta_snapshot() -> Arc<Vec<DocMeta>> {
-        Arc::new(one_doc_snapshot().iter().map(DocMeta::from).collect())
+        Arc::new(vec![DocMeta::from(&one_doc())])
     }
 
     #[test]

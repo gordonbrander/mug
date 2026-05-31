@@ -1,7 +1,7 @@
 //! The site build pipeline. Stages run in order, each consuming the index
 //! the previous stage left behind:
 //!
-//! 1. [`read`] — scan `content/` into an [`Index`].
+//! 1. [`read`] — scan `content/` into a [`DocIndex`](crate::doc_index::DocIndex).
 //! 2. [`markup`] — render markdown bodies through Tera + comrak.
 //! 3. [`generate`] — run `generators/` and append the emitted docs.
 //! 4. [`template`] — apply each doc's Tera template.

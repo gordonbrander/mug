@@ -1,11 +1,11 @@
 use crate::config::Config;
 use crate::doc::Doc;
-use crate::index::Index;
+use crate::doc_index::DocIndex;
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
-pub fn run(config: &Config) -> Result<Index> {
-    let mut index = Index::new();
+pub fn run(config: &Config) -> Result<DocIndex> {
+    let mut index = DocIndex::new();
     if !config.content_dir.exists() {
         return Ok(index);
     }

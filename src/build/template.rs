@@ -1,23 +1,29 @@
 use crate::config::Config;
-use crate::index::Index;
+use crate::doc_index::DocIndex;
 use crate::site_data::SiteData;
 use crate::tera_env::build_template_env;
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::sync::Arc;
 
-pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
-    // Snapshot the index for the `query` function. By spec §11, the index is
-    // fully populated before this phase runs, so a frozen view is exactly what
-    // every template sees.
-    let snapshot = Arc::new(index.docs.clone());
-    let env = build_template_env(config, snapshot)?;
+pub fn run(config: &Config, site_data: &SiteData, index: &mut DocIndex) -> Result<()> {
+    // Read snapshot of the fully-populated index (spec §11), with collections and
+    // the tags group defined on it. The env's `collection()`/`group()`/
+    // `backlinks` functions read from this frozen snapshot; the mutable `index`
+    // below is rendered in place. Collections/groups live only on the snapshot —
+    // the pipeline index doesn't need them once rendering is done.
+    let mut snapshot = index.clone();
+    for (name, query) in &config.collections {
+        snapshot.define_collection(name, query);
+    }
+    snapshot.define_tags_group();
+    let env = build_template_env(config, Arc::new(snapshot))?;
 
-    // Each doc renders independently against the frozen `env`/`site_data`
-    // snapshot and writes only its own `content`. `Tera::render` takes `&self`,
-    // so the env is shared across workers by reference (no per-thread clone).
-    // `par_iter_mut` preserves doc order, so output is identical.
-    index.docs.par_iter_mut().try_for_each(|doc| {
+    // Each doc renders independently against the frozen `env`/`site_data` and
+    // writes only its own `content`. `Tera::render` takes `&self`, so the env is
+    // shared across Rayon workers by reference (no per-thread clone). Reads of
+    // other docs go through the env's snapshot, never the index being mutated.
+    index.par_docs_mut().try_for_each(|doc| {
         let Some(template_name) = doc.template.clone() else {
             return Ok(());
         };

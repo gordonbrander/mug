@@ -10,26 +10,48 @@
 //!   Falls back to root-relative when `site_url` is `None`.
 
 use crate::doc::DocMeta;
+use crate::doc_index::DocIndex;
 use crate::permalink;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tera::{Tera, Value};
 
+/// Resolves a doc `id_path` to its URL (`permalink::to_url(output_path)`), or
+/// `None` if no such doc exists. Lets `permalink`/`link` share one filter body
+/// across the markup env (which only has a `DocMeta` snapshot) and the template
+/// env (which reads through the shared `DocIndex`).
+pub type DocUrlLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// Lookup backed by the markup phase's frozen `DocMeta` snapshot.
+pub fn lookup_from_metas(docs: Arc<Vec<DocMeta>>) -> DocUrlLookup {
+    Arc::new(move |id_path: &str| {
+        let target = PathBuf::from(id_path);
+        docs.iter()
+            .find(|d| d.id_path == target)
+            .map(|d| permalink::to_url(&d.output_path))
+    })
+}
+
+/// Lookup backed by the shared template-phase `DocIndex` (O(1), no clone).
+pub fn lookup_from_index(index: Arc<DocIndex>) -> DocUrlLookup {
+    Arc::new(move |id_path: &str| index.output_path(Path::new(id_path)).map(permalink::to_url))
+}
+
 pub fn register(
     env: &mut Tera,
-    docs: Arc<Vec<DocMeta>>,
+    lookup: DocUrlLookup,
     site_url: Option<String>,
     base_path: String,
 ) {
     // permalink: id_path -> absolute (site_url + base_path + url)
-    let docs_p = docs.clone();
+    let lookup_p = lookup.clone();
     let site_p = site_url.clone();
     let base_p = base_path.clone();
     env.register_filter(
         "permalink",
         move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let url = lookup_doc_url(&docs_p, value, "permalink")?;
+            let url = lookup_doc_url(&lookup_p, value, "permalink")?;
             let out = format!(
                 "{}{}{}",
                 site_p.as_deref().unwrap_or(""),
@@ -41,12 +63,12 @@ pub fn register(
     );
 
     // link: id_path -> root-relative (base_path + url)
-    let docs_l = docs;
+    let lookup_l = lookup;
     let base_l = base_path.clone();
     env.register_filter(
         "link",
         move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let url = lookup_doc_url(&docs_l, value, "link")?;
+            let url = lookup_doc_url(&lookup_l, value, "link")?;
             let out = format!("{}{}", base_l, url);
             tera::to_value(out).map_err(tera::Error::from)
         },
@@ -86,7 +108,7 @@ pub fn register(
 }
 
 fn lookup_doc_url(
-    docs: &[DocMeta],
+    lookup: &DocUrlLookup,
     value: &Value,
     filter_name: &str,
 ) -> tera::Result<String> {
@@ -96,12 +118,10 @@ fn lookup_doc_url(
             filter_name
         ))
     })?;
-    let target = PathBuf::from(id_path_str);
-    let doc = docs.iter().find(|d| d.id_path == target).ok_or_else(|| {
+    lookup(id_path_str).ok_or_else(|| {
         tera::Error::msg(format!(
             "{} filter: no doc with id_path `{}`",
             filter_name, id_path_str
         ))
-    })?;
-    Ok(permalink::to_url(&doc.output_path))
+    })
 }

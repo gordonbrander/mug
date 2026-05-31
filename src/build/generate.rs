@@ -2,7 +2,7 @@ use crate::build::generator::{Generator, Pagination};
 use crate::build::markup;
 use crate::config::Config;
 use crate::doc::{Doc, DocMeta};
-use crate::index::Index;
+use crate::doc_index::DocIndex;
 use crate::permalink;
 use crate::query;
 use crate::site_data::SiteData;
@@ -14,7 +14,7 @@ use std::fs;
 use std::sync::Arc;
 use walkdir::WalkDir;
 
-pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
+pub fn run(config: &Config, site_data: &SiteData, index: &mut DocIndex) -> Result<()> {
     if !config.generators_dir.exists() {
         return Ok(());
     }
@@ -47,11 +47,11 @@ pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<(
 
     // Frozen `DocMeta` view of the post-authored-markup index for wikilink
     // resolution and the URL filters inside generator bodies.
-    let snapshot: Arc<Vec<DocMeta>> = Arc::new(index.docs.iter().map(DocMeta::from).collect());
+    let snapshot: Arc<Vec<DocMeta>> = Arc::new(index.to_doc_metas());
     let mut markup_env = build_markup_env(config, snapshot.clone())?;
 
     for g in generators {
-        let matched: Vec<&Doc> = query::evaluate(&g.query, &index.docs);
+        let matched: Vec<&Doc> = query::evaluate(&g.query, index.docs());
 
         // per_page=0 or unset → single page with every item.
         let per_page = g
