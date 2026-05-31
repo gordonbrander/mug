@@ -105,117 +105,30 @@ impl Default for Doc {
 }
 
 impl Doc {
-    /// Assemble a Doc from already-split inputs. Uplifts `title`, `template`,
-    /// `terms`, `date`, `updated` from `data` per spec §5. `taxonomies` drives
-    /// term uplift (one bucket per taxonomy, read from its frontmatter field).
-    /// No filesystem fallback for dates — that's `load`'s job.
-    pub fn new(id_path: PathBuf, content: String, data: Mapping, taxonomies: &[Taxonomy]) -> Doc {
-        let title = uplift_string(&data, "title").unwrap_or_default();
-        let summary = uplift_string(&data, "summary").unwrap_or_default();
-        let template = uplift_string(&data, "template");
-        let terms = uplift_terms(&data, taxonomies);
-        let date = parse_date(data.get("date")).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        let updated = parse_date(data.get("updated")).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        let output_path = resolve_output_path(&id_path, &data, &date);
+    /// Assemble a Doc from already-split inputs, holding the raw frontmatter in
+    /// `data` and the unrendered body in `content`. Derived fields (`title`,
+    /// `terms`, `date`, …) stay at their defaults until [`Doc::uplift_frontmatter`] runs;
+    /// `output_path` starts as the path-mirroring default so an un-uplifted Doc
+    /// still has a sane location.
+    pub fn new(id_path: PathBuf, content: String, data: Mapping) -> Doc {
+        let output_path = permalink::default_for(&id_path);
         Doc {
             id_path,
             output_path,
-            template,
-            title,
-            summary,
             content,
-            terms,
-            date,
-            updated,
             data,
-            links: Vec::new(),
+            ..Doc::default()
         }
     }
 
-    /// Split frontmatter out of `source`, parse it as YAML, and build a Doc.
-    /// Returns Err only if a present frontmatter block contains malformed
-    /// YAML; missing or unterminated frontmatter is silently treated as no
-    /// frontmatter (see `frontmatter::split`).
-    pub fn parse(id_path: PathBuf, source: &str, taxonomies: &[Taxonomy]) -> Result<Doc> {
-        let (data, body) = frontmatter::parse(source)?;
-        Ok(Doc::new(id_path, body, data, taxonomies))
-    }
-
-    /// Build a Doc from a `.yaml` source: the whole file is the data map; the
-    /// `content` field (if present and a string) becomes the body. Non-string
-    /// or missing `content` defaults to an empty body.
-    pub fn parse_yaml(id_path: PathBuf, source: &str, taxonomies: &[Taxonomy]) -> Result<Doc> {
-        let (data, content) = frontmatter::parse_yaml(source)?;
-        Ok(Doc::new(id_path, content, data, taxonomies))
-    }
-
-    /// Returns the kind of this doc as derived from `id_path`'s extension.
-    /// `.md` → Markdown; `.yaml` → Yaml; everything else → Raw. Authored
-    /// content always has one of those three extensions (read::run filters);
-    /// generator-emitted docs can have anything (e.g. `.xml`) and need the
-    /// Raw (Tera-only, no Markdown render) treatment.
-    pub fn kind(&self) -> DocKind {
-        DocKind::from(self.id_path.as_path())
-    }
-
-    /// Read `content_dir.join(id_path)` from disk, parse it, and apply the
-    /// filesystem-based fallback chain for `date` (created → modified) and
-    /// `updated` (modified) when frontmatter didn't supply a parseable value.
-    pub fn load(content_dir: &Path, id_path: &Path, taxonomies: &[Taxonomy]) -> Result<Doc> {
-        let fs_path = content_dir.join(id_path);
-        let source = fs::read_to_string(&fs_path)
-            .with_context(|| format!("could not read {}", fs_path.display()))?;
-        let meta = fs::metadata(&fs_path)
-            .with_context(|| format!("could not stat {}", fs_path.display()))?;
-        let (data, body) = match DocKind::from(id_path) {
-            DocKind::Yaml => frontmatter::parse_yaml(&source),
-            _ => frontmatter::parse(&source),
-        }
-        .with_context(|| format!("could not parse {}", fs_path.display()))?;
-        let mut doc = Doc::new(id_path.to_path_buf(), body, data, taxonomies);
-
-        let date_from_fs = parse_date(doc.data.get("date")).is_none();
-        if date_from_fs {
-            doc.date = meta
-                .created()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .or_else(|| meta.modified().ok().map(DateTime::<Utc>::from))
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        }
-        if parse_date(doc.data.get("updated")).is_none() {
-            doc.updated = meta
-                .modified()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        }
-        if date_from_fs {
-            doc.output_path = resolve_output_path(&doc.id_path, &doc.data, &doc.date);
-        }
-        Ok(doc)
-    }
-
-    /// Merge per-collection `defaults` into this doc's frontmatter, filling only
-    /// keys the doc didn't set itself (the doc's own frontmatter always wins),
-    /// then re-derive the affected fields. Runs after collection classification
-    /// and before markup (see `build::defaults`), so a defaulted taxonomy field
-    /// (e.g. `tags`) is picked up by the post-markup taxonomy classification, and
-    /// a defaulted `permalink`/`date` is reflected in `output_path`.
-    pub fn apply_defaults(&mut self, defaults: &Mapping, taxonomies: &[Taxonomy]) {
-        let mut changed = false;
-        for (k, v) in defaults {
-            if !self.data.contains_key(k) {
-                self.data.insert(k.clone(), v.clone());
-                changed = true;
-            }
-        }
-        if !changed {
-            return;
-        }
-        // Re-uplift the fields derived from frontmatter. `date`/`updated` keep
-        // their (possibly filesystem-derived) value unless the default supplied a
-        // parseable one. `output_path` is recomputed last, against the final date.
+    /// Derive the metadata fields from `self.data` (spec §5): `title`, `summary`,
+    /// `template`, `terms` (one bucket per taxonomy, read from its frontmatter
+    /// field), and `output_path` (expanding any `permalink`). `date`/`updated`
+    /// are overwritten **only** when frontmatter supplies a parseable value, so
+    /// any pre-seeded value (the filesystem dates set by [`Doc::load`], or the
+    /// result of an earlier uplift before [`Doc::apply_defaults`]) is preserved
+    /// otherwise.
+    pub fn uplift_frontmatter(&mut self, taxonomies: &[Taxonomy]) {
         self.title = uplift_string(&self.data, "title").unwrap_or_default();
         self.summary = uplift_string(&self.data, "summary").unwrap_or_default();
         self.template = uplift_string(&self.data, "template");
@@ -227,6 +140,80 @@ impl Doc {
             self.updated = updated;
         }
         self.output_path = resolve_output_path(&self.id_path, &self.data, &self.date);
+    }
+
+    /// Split frontmatter out of `source` and build a Doc (un-uplifted; call
+    /// [`Doc::uplift_frontmatter`] to derive fields). Returns Err only if a present
+    /// frontmatter block contains malformed YAML; missing or unterminated
+    /// frontmatter is silently treated as no frontmatter (see `frontmatter::split`).
+    pub fn parse(id_path: PathBuf, source: &str) -> Result<Doc> {
+        let (data, body) = frontmatter::parse(source)?;
+        Ok(Doc::new(id_path, body, data))
+    }
+
+    /// Build a Doc from a `.yaml` source: the whole file is the data map; the
+    /// `content` field (if present and a string) becomes the body. Non-string
+    /// or missing `content` defaults to an empty body. Un-uplifted; call
+    /// [`Doc::uplift_frontmatter`] to derive fields.
+    pub fn parse_yaml(id_path: PathBuf, source: &str) -> Result<Doc> {
+        let (data, content) = frontmatter::parse_yaml(source)?;
+        Ok(Doc::new(id_path, content, data))
+    }
+
+    /// Returns the kind of this doc as derived from `id_path`'s extension.
+    /// `.md` → Markdown; `.yaml` → Yaml; everything else → Raw. Authored
+    /// content always has one of those three extensions (read::run filters);
+    /// generator-emitted docs can have anything (e.g. `.xml`) and need the
+    /// Raw (Tera-only, no Markdown render) treatment.
+    pub fn kind(&self) -> DocKind {
+        DocKind::from(self.id_path.as_path())
+    }
+
+    /// Read `content_dir.join(id_path)` from disk, parse it, seed `date`/`updated`
+    /// from filesystem metadata, then uplift frontmatter — which overrides those
+    /// dates when the frontmatter supplies parseable values. So frontmatter wins
+    /// and the filesystem fills in (`date`: created → modified; `updated`: modified).
+    pub fn load(content_dir: &Path, id_path: &Path, taxonomies: &[Taxonomy]) -> Result<Doc> {
+        let fs_path = content_dir.join(id_path);
+        let source = fs::read_to_string(&fs_path)
+            .with_context(|| format!("could not read {}", fs_path.display()))?;
+        let meta = fs::metadata(&fs_path)
+            .with_context(|| format!("could not stat {}", fs_path.display()))?;
+        let (data, body) = match DocKind::from(id_path) {
+            DocKind::Yaml => frontmatter::parse_yaml(&source),
+            _ => frontmatter::parse(&source),
+        }
+        .with_context(|| format!("could not parse {}", fs_path.display()))?;
+        let mut doc = Doc::new(id_path.to_path_buf(), body, data);
+        // Seed dates from the filesystem (created → modified for `date`, modified
+        // for `updated`). `uplift_frontmatter` then overwrites either one when
+        // frontmatter supplies a parseable value, and computes `output_path`
+        // against the resulting date — so frontmatter wins, filesystem fills in.
+        doc.date = meta
+            .created()
+            .ok()
+            .map(DateTime::<Utc>::from)
+            .or_else(|| meta.modified().ok().map(DateTime::<Utc>::from))
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        doc.updated = meta
+            .modified()
+            .ok()
+            .map(DateTime::<Utc>::from)
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        doc.uplift_frontmatter(taxonomies);
+        Ok(doc)
+    }
+
+    /// Merge per-collection `defaults` into this doc's frontmatter, filling only
+    /// keys the doc didn't set itself (the doc's own frontmatter always wins).
+    /// This only touches `self.data`; the caller re-derives fields by calling
+    /// [`Doc::uplift_frontmatter`] afterwards (see `build::defaults`).
+    pub fn apply_defaults(&mut self, defaults: &Mapping) {
+        for (k, v) in defaults {
+            if !self.data.contains_key(k) {
+                self.data.insert(k.clone(), v.clone());
+            }
+        }
     }
 }
 
@@ -306,6 +293,13 @@ mod tests {
         vec![Taxonomy::new("tags")]
     }
 
+    /// Construct a Doc and uplift its metadata — the read-phase pairing.
+    fn uplifted(id_path: &str, content: &str, data: Mapping, taxonomies: &[Taxonomy]) -> Doc {
+        let mut d = Doc::new(PathBuf::from(id_path), content.to_string(), data);
+        d.uplift_frontmatter(taxonomies);
+        d
+    }
+
     #[test]
     fn default_doc_uses_unix_epoch() {
         let d = Doc::default();
@@ -318,31 +312,31 @@ mod tests {
     }
 
     #[test]
-    fn new_uplifts_summary_from_frontmatter() {
+    fn uplift_frontmatter_summary_from_frontmatter() {
         let data = map_from(&[("summary", Value::String("Hand-written blurb.".into()))]);
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), data, &tax());
+        let d = uplifted("p.md", "", data, &tax());
         assert_eq!(d.summary, "Hand-written blurb.");
     }
 
     #[test]
-    fn new_defaults_summary_to_empty_when_missing() {
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new(), &tax());
+    fn uplift_frontmatter_defaults_summary_to_empty_when_missing() {
+        let d = uplifted("p.md", "", Mapping::new(), &tax());
         assert_eq!(d.summary, "");
     }
 
     #[test]
-    fn new_uplifts_title_and_template() {
+    fn uplift_frontmatter_title_and_template() {
         let data = map_from(&[
             ("title", Value::String("Hi".into())),
             ("template", Value::String("base.html".into())),
         ]);
-        let d = Doc::new(PathBuf::from("post.md"), String::new(), data, &tax());
+        let d = uplifted("post.md", "", data, &tax());
         assert_eq!(d.title, "Hi");
         assert_eq!(d.template.as_deref(), Some("base.html"));
     }
 
     #[test]
-    fn new_uplifts_tags_as_string_sequence() {
+    fn uplift_frontmatter_tags_as_string_sequence() {
         let data = map_from(&[(
             "tags",
             Value::Sequence(vec![
@@ -351,7 +345,7 @@ mod tests {
                 Value::Number(serde_yaml_ng::Number::from(7)),
             ]),
         )]);
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), data, &tax());
+        let d = uplifted("p.md", "", data, &tax());
         // Keyed by slug → display text; non-string entries (the `7`) are skipped.
         let tags = &d.terms["tags"];
         assert_eq!(tags.len(), 2);
@@ -360,21 +354,21 @@ mod tests {
     }
 
     #[test]
-    fn new_uplifts_custom_taxonomy_field() {
+    fn uplift_frontmatter_custom_taxonomy_field() {
         let data = map_from(&[(
             "categories",
             Value::Sequence(vec![Value::String("Tech".into())]),
         )]);
         let taxonomies = vec![Taxonomy::new("tags"), Taxonomy::new("categories")];
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), data, &taxonomies);
+        let d = uplifted("p.md", "", data, &taxonomies);
         assert_eq!(d.terms["categories"]["tech"], "Tech");
         // `tags` bucket exists but is empty.
         assert!(d.terms["tags"].is_empty());
     }
 
     #[test]
-    fn new_defaults_when_keys_missing() {
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new(), &tax());
+    fn uplift_frontmatter_defaults_when_keys_missing() {
+        let d = uplifted("p.md", "", Mapping::new(), &tax());
         assert_eq!(d.title, "");
         // A bucket is created per taxonomy even with no terms.
         assert!(d.terms["tags"].is_empty());
@@ -383,15 +377,15 @@ mod tests {
     }
 
     #[test]
-    fn new_preserves_uplifted_keys_in_data() {
+    fn new_preserves_keys_in_data() {
         let data = map_from(&[("title", Value::String("Hi".into()))]);
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), data, &tax());
+        let d = Doc::new(PathBuf::from("p.md"), String::new(), data);
         assert_eq!(d.data.get("title").and_then(Value::as_str), Some("Hi"));
     }
 
     #[test]
     fn output_path_swaps_extension_to_html() {
-        let d = Doc::new(PathBuf::from("blog/post.md"), String::new(), Mapping::new(), &tax());
+        let d = Doc::new(PathBuf::from("blog/post.md"), String::new(), Mapping::new());
         assert_eq!(d.output_path, PathBuf::from("blog/post.html"));
     }
 
@@ -419,12 +413,12 @@ mod tests {
     #[test]
     fn parse_returns_err_on_malformed_yaml() {
         let source = "---\ntitle: [unterminated\n---\nbody";
-        assert!(Doc::parse(PathBuf::from("p.md"), source, &tax()).is_err());
+        assert!(Doc::parse(PathBuf::from("p.md"), source).is_err());
     }
 
     #[test]
     fn parse_treats_missing_frontmatter_as_empty() {
-        let d = Doc::parse(PathBuf::from("p.md"), "# Body\n", &tax()).unwrap();
+        let d = Doc::parse(PathBuf::from("p.md"), "# Body\n").unwrap();
         assert_eq!(d.content, "# Body\n");
         assert!(d.data.is_empty());
     }
@@ -443,11 +437,11 @@ mod tests {
 
     #[test]
     fn kind_dispatches_on_extension() {
-        let md = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new(), &tax());
-        let html = Doc::new(PathBuf::from("p.html"), String::new(), Mapping::new(), &tax());
-        let yaml = Doc::new(PathBuf::from("p.yaml"), String::new(), Mapping::new(), &tax());
-        let xml = Doc::new(PathBuf::from("p.xml"), String::new(), Mapping::new(), &tax());
-        let extless = Doc::new(PathBuf::from("p"), String::new(), Mapping::new(), &tax());
+        let md = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new());
+        let html = Doc::new(PathBuf::from("p.html"), String::new(), Mapping::new());
+        let yaml = Doc::new(PathBuf::from("p.yaml"), String::new(), Mapping::new());
+        let xml = Doc::new(PathBuf::from("p.xml"), String::new(), Mapping::new());
+        let extless = Doc::new(PathBuf::from("p"), String::new(), Mapping::new());
         assert_eq!(md.kind(), DocKind::Markdown);
         assert_eq!(html.kind(), DocKind::Raw);
         assert_eq!(yaml.kind(), DocKind::Yaml);
@@ -460,7 +454,8 @@ mod tests {
     #[test]
     fn parse_yaml_extracts_content_and_uplifts() {
         let source = "title: Hi\ntags: [a, b]\ndate: 2025-10-31\ncontent: \"<p>body</p>\"\n";
-        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), source, &tax()).unwrap();
+        let mut d = Doc::parse_yaml(PathBuf::from("p.yaml"), source).unwrap();
+        d.uplift_frontmatter(&tax());
         assert_eq!(d.title, "Hi");
         assert_eq!(d.terms["tags"]["a"], "a");
         assert_eq!(d.terms["tags"]["b"], "b");
@@ -470,24 +465,24 @@ mod tests {
 
     #[test]
     fn parse_yaml_defaults_content_when_missing() {
-        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), "title: Hi\n", &tax()).unwrap();
+        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), "title: Hi\n").unwrap();
         assert_eq!(d.content, "");
     }
 
     #[test]
     fn parse_yaml_defaults_content_when_non_string() {
-        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), "content: 42\n", &tax()).unwrap();
+        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), "content: 42\n").unwrap();
         assert_eq!(d.content, "");
     }
 
     #[test]
     fn parse_yaml_errors_on_malformed_yaml() {
-        assert!(Doc::parse_yaml(PathBuf::from("p.yaml"), "title: [unterminated", &tax()).is_err());
+        assert!(Doc::parse_yaml(PathBuf::from("p.yaml"), "title: [unterminated").is_err());
     }
 
     #[test]
     fn parse_yaml_output_path_swaps_to_html() {
-        let d = Doc::parse_yaml(PathBuf::from("page.yaml"), "title: Hi\n", &tax()).unwrap();
+        let d = Doc::parse_yaml(PathBuf::from("page.yaml"), "title: Hi\n").unwrap();
         assert_eq!(d.output_path, PathBuf::from("page.html"));
     }
 
@@ -521,41 +516,27 @@ mod tests {
 
     #[test]
     fn apply_defaults_fills_missing_and_recomputes_output_path() {
-        let mut d = Doc::new(
-            PathBuf::from("posts/hello.md"),
-            String::new(),
-            mapping("date: 2025-03-07\n"),
-            &tax(),
-        );
-        d.apply_defaults(&mapping("permalink: \":yyyy/:mm/:dd/:slug/\"\n"), &tax());
+        // Mirror the pipeline: load (new + uplift), then defaults (apply + re-uplift).
+        let mut d = uplifted("posts/hello.md", "", mapping("date: 2025-03-07\n"), &tax());
+        d.apply_defaults(&mapping("permalink: \":yyyy/:mm/:dd/:slug/\"\n"));
+        d.uplift_frontmatter(&tax());
         assert_eq!(d.output_path, PathBuf::from("2025/03/07/hello/index.html"));
     }
 
     #[test]
     fn apply_defaults_own_frontmatter_wins() {
-        let mut d = Doc::new(
-            PathBuf::from("posts/hello.md"),
-            String::new(),
-            mapping("permalink: /custom/\n"),
-            &tax(),
-        );
-        d.apply_defaults(&mapping("permalink: \":slug/\"\n"), &tax());
+        let mut d = uplifted("posts/hello.md", "", mapping("permalink: /custom/\n"), &tax());
+        d.apply_defaults(&mapping("permalink: \":slug/\"\n"));
+        d.uplift_frontmatter(&tax());
         assert_eq!(d.output_path, PathBuf::from("custom/index.html"));
     }
 
     #[test]
     fn apply_defaults_picks_up_template_and_taxonomy_field() {
         let taxonomies = vec![Taxonomy::new("tags"), Taxonomy::new("categories")];
-        let mut d = Doc::new(
-            PathBuf::from("posts/hello.md"),
-            String::new(),
-            Mapping::new(),
-            &taxonomies,
-        );
-        d.apply_defaults(
-            &mapping("template: post.html\ncategories: [Tech]\n"),
-            &taxonomies,
-        );
+        let mut d = uplifted("posts/hello.md", "", Mapping::new(), &taxonomies);
+        d.apply_defaults(&mapping("template: post.html\ncategories: [Tech]\n"));
+        d.uplift_frontmatter(&taxonomies);
         assert_eq!(d.template.as_deref(), Some("post.html"));
         assert_eq!(d.terms["categories"]["tech"], "Tech");
     }

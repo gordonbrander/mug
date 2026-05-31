@@ -37,11 +37,13 @@ pub fn run(config: &Config, index: &mut DocIndex) -> Result<()> {
         }
     }
 
-    // Apply each doc's combined defaults. Order across docs is irrelevant — each
-    // doc's combined map is fully built first, and the merge is fill-missing.
+    // Apply each doc's combined defaults, then re-derive its metadata fields from
+    // the merged frontmatter. Order across docs is irrelevant — each doc's
+    // combined map is fully built first, and the merge is fill-missing.
     for (id, combined) in &per_doc {
         if let Some(doc) = index.doc_mut(id) {
-            doc.apply_defaults(combined, &config.taxonomies);
+            doc.apply_defaults(combined);
+            doc.uplift_frontmatter(&config.taxonomies);
         }
     }
     Ok(())

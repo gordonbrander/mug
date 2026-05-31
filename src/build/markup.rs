@@ -128,7 +128,6 @@ mod tests {
             PathBuf::from("post.md"),
             "# Hello\n\nThis is the body of the post. It has several words.".to_string(),
             Mapping::new(),
-            &[],
         );
         render_doc(&mut doc);
         assert!(!doc.summary.is_empty(), "expected a fallback summary");
@@ -141,7 +140,7 @@ mod tests {
     #[test]
     fn fallback_summary_truncates_long_bodies() {
         let long_body: String = "word ".repeat(100); // 500 chars
-        let mut doc = Doc::new(PathBuf::from("post.md"), long_body, Mapping::new(), &[]);
+        let mut doc = Doc::new(PathBuf::from("post.md"), long_body, Mapping::new());
         render_doc(&mut doc);
         assert!(doc.summary.chars().count() <= 250);
         assert!(doc.summary.ends_with('…'));
@@ -159,8 +158,10 @@ mod tests {
             "# Hello\n\nMuch longer body that would otherwise yield a different summary."
                 .to_string(),
             data,
-            &[],
         );
+        // Frontmatter summary is uplifted at read time; mirror that here so the
+        // markup fallback sees a non-empty summary and leaves it untouched.
+        doc.uplift_frontmatter(&[]);
         render_doc(&mut doc);
         assert_eq!(doc.summary, "Hand-written blurb.");
     }
@@ -171,7 +172,6 @@ mod tests {
             PathBuf::from("page.html"),
             "<p>raw html body</p>".to_string(),
             Mapping::new(),
-            &[],
         );
         render_doc(&mut doc);
         assert_eq!(doc.summary, "");
@@ -183,7 +183,6 @@ mod tests {
             PathBuf::from("page.yaml"),
             "<p>yaml-derived body</p>".to_string(),
             Mapping::new(),
-            &[],
         );
         render_doc(&mut doc);
         assert_eq!(doc.summary, "");
