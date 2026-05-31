@@ -1,4 +1,3 @@
-use crate::defaults::Defaults;
 use crate::frontmatter;
 use crate::permalink;
 use crate::taxonomy::Taxonomy;
@@ -162,25 +161,17 @@ impl Doc {
     /// Read `content_dir.join(id_path)` from disk, parse it, and apply the
     /// filesystem-based fallback chain for `date` (created → modified) and
     /// `updated` (modified) when frontmatter didn't supply a parseable value.
-    pub fn load(
-        content_dir: &Path,
-        id_path: &Path,
-        defaults: &Defaults,
-        taxonomies: &[Taxonomy],
-    ) -> Result<Doc> {
+    pub fn load(content_dir: &Path, id_path: &Path, taxonomies: &[Taxonomy]) -> Result<Doc> {
         let fs_path = content_dir.join(id_path);
         let source = fs::read_to_string(&fs_path)
             .with_context(|| format!("could not read {}", fs_path.display()))?;
         let meta = fs::metadata(&fs_path)
             .with_context(|| format!("could not stat {}", fs_path.display()))?;
-        let (mut data, body) = match DocKind::from(id_path) {
+        let (data, body) = match DocKind::from(id_path) {
             DocKind::Yaml => frontmatter::parse_yaml(&source),
             _ => frontmatter::parse(&source),
         }
         .with_context(|| format!("could not parse {}", fs_path.display()))?;
-        // Merge config defaults into the raw frontmatter before constructing
-        // the Doc, so uplifted fields and the expanded permalink reflect them.
-        defaults.apply(id_path, &mut data);
         let mut doc = Doc::new(id_path.to_path_buf(), body, data, taxonomies);
 
         let date_from_fs = parse_date(doc.data.get("date")).is_none();
@@ -203,6 +194,39 @@ impl Doc {
             doc.output_path = resolve_output_path(&doc.id_path, &doc.data, &doc.date);
         }
         Ok(doc)
+    }
+
+    /// Merge per-collection `defaults` into this doc's frontmatter, filling only
+    /// keys the doc didn't set itself (the doc's own frontmatter always wins),
+    /// then re-derive the affected fields. Runs after collection classification
+    /// and before markup (see `build::defaults`), so a defaulted taxonomy field
+    /// (e.g. `tags`) is picked up by the post-markup taxonomy classification, and
+    /// a defaulted `permalink`/`date` is reflected in `output_path`.
+    pub fn apply_defaults(&mut self, defaults: &Mapping, taxonomies: &[Taxonomy]) {
+        let mut changed = false;
+        for (k, v) in defaults {
+            if !self.data.contains_key(k) {
+                self.data.insert(k.clone(), v.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+        // Re-uplift the fields derived from frontmatter. `date`/`updated` keep
+        // their (possibly filesystem-derived) value unless the default supplied a
+        // parseable one. `output_path` is recomputed last, against the final date.
+        self.title = uplift_string(&self.data, "title").unwrap_or_default();
+        self.summary = uplift_string(&self.data, "summary").unwrap_or_default();
+        self.template = uplift_string(&self.data, "template");
+        self.terms = uplift_terms(&self.data, taxonomies);
+        if let Some(date) = parse_date(self.data.get("date")) {
+            self.date = date;
+        }
+        if let Some(updated) = parse_date(self.data.get("updated")) {
+            self.updated = updated;
+        }
+        self.output_path = resolve_output_path(&self.id_path, &self.data, &self.date);
     }
 }
 
@@ -412,7 +436,7 @@ mod tests {
         let mut f = fs::File::create(&path).unwrap();
         writeln!(f, "---\ndate: 2025-10-31\n---\nbody").unwrap();
         drop(f);
-        let d = Doc::load(&dir, Path::new("post.md"), &Defaults::default(), &tax()).unwrap();
+        let d = Doc::load(&dir, Path::new("post.md"), &tax()).unwrap();
         assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -472,7 +496,7 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("doc.yaml");
         fs::write(&path, "title: From YAML\ncontent: \"<p>hi</p>\"\n").unwrap();
-        let d = Doc::load(&dir, Path::new("doc.yaml"), &Defaults::default(), &tax()).unwrap();
+        let d = Doc::load(&dir, Path::new("doc.yaml"), &tax()).unwrap();
         assert_eq!(d.title, "From YAML");
         assert_eq!(d.content, "<p>hi</p>");
         let _ = fs::remove_dir_all(&dir);
@@ -483,7 +507,7 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("post.md");
         fs::write(&path, "# Hello\n").unwrap();
-        let d = Doc::load(&dir, Path::new("post.md"), &Defaults::default(), &tax()).unwrap();
+        let d = Doc::load(&dir, Path::new("post.md"), &tax()).unwrap();
         // No frontmatter date — should pick up something more recent than the epoch
         // from the just-created file's metadata.
         assert!(d.date > DateTime::<Utc>::UNIX_EPOCH);
@@ -491,44 +515,49 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    fn defaults(s: &str) -> Defaults {
-        Defaults::from_yaml_mapping(&serde_yaml_ng::from_str(s).unwrap()).unwrap()
+    fn mapping(s: &str) -> Mapping {
+        serde_yaml_ng::from_str(s).unwrap()
     }
 
     #[test]
-    fn load_applies_default_permalink_when_absent() {
-        let dir = tempdir();
-        fs::create_dir_all(dir.join("posts")).unwrap();
-        fs::write(dir.join("posts/hello.md"), "---\ndate: 2025-03-07\n---\nbody").unwrap();
-        let d = Doc::load(
-            &dir,
-            Path::new("posts/hello.md"),
-            &defaults("\"posts/*.md\":\n  permalink: \":yyyy/:mm/:dd/:slug/\"\n"),
+    fn apply_defaults_fills_missing_and_recomputes_output_path() {
+        let mut d = Doc::new(
+            PathBuf::from("posts/hello.md"),
+            String::new(),
+            mapping("date: 2025-03-07\n"),
             &tax(),
-        )
-        .unwrap();
+        );
+        d.apply_defaults(&mapping("permalink: \":yyyy/:mm/:dd/:slug/\"\n"), &tax());
         assert_eq!(d.output_path, PathBuf::from("2025/03/07/hello/index.html"));
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_frontmatter_permalink_wins_over_default() {
-        let dir = tempdir();
-        fs::create_dir_all(dir.join("posts")).unwrap();
-        fs::write(
-            dir.join("posts/hello.md"),
-            "---\npermalink: /custom/\n---\nbody",
-        )
-        .unwrap();
-        let d = Doc::load(
-            &dir,
-            Path::new("posts/hello.md"),
-            &defaults("\"posts/*.md\":\n  permalink: \":slug\"\n"),
+    fn apply_defaults_own_frontmatter_wins() {
+        let mut d = Doc::new(
+            PathBuf::from("posts/hello.md"),
+            String::new(),
+            mapping("permalink: /custom/\n"),
             &tax(),
-        )
-        .unwrap();
+        );
+        d.apply_defaults(&mapping("permalink: \":slug/\"\n"), &tax());
         assert_eq!(d.output_path, PathBuf::from("custom/index.html"));
-        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_defaults_picks_up_template_and_taxonomy_field() {
+        let taxonomies = vec![Taxonomy::new("tags"), Taxonomy::new("categories")];
+        let mut d = Doc::new(
+            PathBuf::from("posts/hello.md"),
+            String::new(),
+            Mapping::new(),
+            &taxonomies,
+        );
+        d.apply_defaults(
+            &mapping("template: post.html\ncategories: [Tech]\n"),
+            &taxonomies,
+        );
+        assert_eq!(d.template.as_deref(), Some("post.html"));
+        assert_eq!(d.terms["categories"]["tech"], "Tech");
     }
 
     fn tempdir() -> PathBuf {

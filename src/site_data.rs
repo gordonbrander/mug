@@ -41,10 +41,7 @@ fn load_data(config: &Config) -> Result<Mapping> {
         if !file_type.is_file() {
             continue;
         }
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         if !matches!(ext, "yaml" | "yml") {
             continue;
         }
@@ -52,8 +49,8 @@ fn load_data(config: &Config) -> Result<Mapping> {
             Some(s) => s.to_string(),
             None => continue,
         };
-        let body = fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let body =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         let value: Value = serde_yaml_ng::from_str(&body)
             .with_context(|| format!("parsing {}", path.display()))?;
         map.insert(Value::String(stem), value);
@@ -73,8 +70,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.subsec_nanos())
             .unwrap_or(0);
-        let dir = std::env::temp_dir()
-            .join(format!("mug-sitedata-{}-{}", std::process::id(), nanos));
+        let dir =
+            std::env::temp_dir().join(format!("mug-sitedata-{}-{}", std::process::id(), nanos));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

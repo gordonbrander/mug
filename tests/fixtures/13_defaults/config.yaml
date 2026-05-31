@@ -1,6 +1,9 @@
 site:
   title: My Site
   description: A test site
+collections:
+  posts:
+    path: "posts/*.md"
 defaults:
-  "posts/*.md":
+  posts:
     permalink: /blog/:yyyy/:slug/

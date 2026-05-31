@@ -1,24 +1,29 @@
-//! The classify phase. After markup, build the *frozen classification* — a
-//! snapshot of the source docs with collections and taxonomies defined on it —
-//! and hand it to the archives and template phases as a shared `Arc<DocIndex>`.
+//! Classification: the named **collections** and **taxonomies** that templates
+//! (`collection()` / `taxonomy()`) and archives read. It is split across the
+//! pipeline so each half runs when its inputs are ready:
 //!
-//! Classification is built from source content only and never mutated again, so
-//! the parallel phases downstream can read it by reference. Crucially,
-//! archive-generated pages are appended to the *live* index but are not present
-//! here, so `collection()`/`taxonomy()` only ever list authored docs (no
-//! feedback loop, no ordering between archives).
+//! - [`collections`] runs **before markup**. Collection membership is pure
+//!   frontmatter metadata (path glob + ordering), so it needs nothing from the
+//!   render. Computing it early lets the defaults phase fill each collection's
+//!   members before their bodies render.
+//! - [`taxonomies`] runs **after markup**, because the inline `#hashtag` pass
+//!   mutates `doc.terms` during markup.
+//!
+//! Both define onto the live index in place; generated archive pages are added
+//! later and are deliberately never classified, so `collection()`/`taxonomy()`
+//! only ever list authored docs.
 
 use crate::config::Config;
 use crate::doc_index::DocIndex;
-use std::sync::Arc;
 
-/// Clone the post-markup index and define every configured collection and
-/// taxonomy on the clone, returning it frozen behind an `Arc`.
-pub fn run(config: &Config, index: &DocIndex) -> Arc<DocIndex> {
-    let mut snapshot = index.clone();
+/// Evaluate every configured collection query and cache its membership.
+pub fn collections(config: &Config, index: &mut DocIndex) {
     for (name, query) in &config.collections {
-        snapshot.define_collection(name, query);
+        index.define_collection(name, query);
     }
-    snapshot.define_taxonomies(&config.taxonomies);
-    Arc::new(snapshot)
+}
+
+/// Bucket every configured taxonomy's terms.
+pub fn taxonomies(config: &Config, index: &mut DocIndex) {
+    index.define_taxonomies(&config.taxonomies);
 }

@@ -143,10 +143,9 @@ pub fn run(
     config: &Config,
     site_data: &SiteData,
     classification: &Arc<DocIndex>,
-    index: &mut DocIndex,
-) -> Result<()> {
+) -> Result<Vec<Doc>> {
     if !config.archives_dir.exists() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let mut archives: Vec<Archive> = Vec::new();
@@ -172,13 +171,14 @@ pub fn run(
 
     // Frozen `DocMeta` view of the source docs (post-markup) for wikilink
     // resolution and URL filters inside archive bodies.
-    let snapshot: Arc<Vec<DocMeta>> = Arc::new(index.to_doc_metas());
+    let snapshot: Arc<Vec<DocMeta>> = Arc::new(classification.to_doc_metas());
     let markup_env = build_markup_env(config, snapshot)?;
 
     // Archives are mutually independent (each reads only the frozen
     // classification, none reads another's output), so fan out across Rayon —
-    // each worker renders archive bodies with its own `MarkupEnv` clone. Collect
-    // all emitted docs, then insert sequentially into the live index.
+    // each worker renders archive bodies with its own `MarkupEnv` clone. The
+    // emitted pages are returned for the template phase to render; they are never
+    // added to the index (generated pages are not classified).
     let emitted: Vec<Doc> = archives
         .par_iter()
         .map_init(
@@ -190,11 +190,7 @@ pub fn run(
         .flatten()
         .collect();
 
-    for doc in emitted {
-        index.insert(doc);
-    }
-
-    Ok(())
+    Ok(emitted)
 }
 
 /// Produce every page for one archive: one paginated run for a collection, or

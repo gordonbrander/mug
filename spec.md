@@ -108,8 +108,9 @@ resolve `permalink`-based links (see §6.1).
 value** (e.g. `My Tag` → `my-tag: "My Tag"`). Keying by slug deduplicates tags
 that slugify identically and gives templates both a URL-safe slug and the
 original text; iteration is sorted by slug for deterministic output. Templates
-iterate `{% for slug, text in page.tags %}`, and `query(tag=…)` matches by slug,
-so `tag="My Tag"` and `tag="my-tag"` are equivalent (see §9).
+iterate `{% for slug, text in page.terms.tags %}`. Listing docs by tag is done
+through the `tags` taxonomy — `taxonomy(name="tags")` and `kind: taxonomy`
+archives (§7.1) — not a query filter.
 
 Tags come from the frontmatter `tags:` sequence. Optionally — when
 `hashtags: true` is set in `config.yaml` — the markup phase also scans Markdown
@@ -140,7 +141,21 @@ Walk `content/`, classify files, parse frontmatter, compute `id_path` and
 `output_path`, and construct `Doc` structs. Bodies are *not* rendered yet.
 Load `data/` into the data cascade. This phase populates the index keys (§7).
 
-### Phase 2 — `markup`
+### Phase 2 — `classify` (collections)
+
+Evaluate every `collections:` query and cache its membership (§9). Collection
+membership is pure frontmatter metadata, so it is available before any body is
+rendered. Running it here lets the next phase target a collection's members.
+
+### Phase 3 — `defaults`
+
+Apply per-collection default frontmatter from the `defaults:` config block. Each `defaults:` entry names a
+collection; its values fill keys the collection's members did not set themselves
+(the document's own frontmatter always wins). Because defaults land before
+markup, a defaulted taxonomy field (e.g. `tags`) is seen by taxonomy
+classification, and a defaulted `permalink`/`date` is reflected in `output_path`.
+
+### Phase 4 — `markup`
 
 Render each document's body to its final `content` (HTML). This phase runs Tera
 **with a restricted configuration** — index-based filters such as `query` and
@@ -166,15 +181,15 @@ can expose a **`permalink` filter** that expands a document's `id_path` into its
 `output_path`. This is how authored content links to other content without
 hardcoding output URLs (and it is the resolution target for wikilinks; see §8).
 
-### Phase 3 — `classify`
+### Phase 5 — `classify` (taxonomies)
 
-Build the **frozen classification** from the source docs: evaluate every
-`collections:` query and bucket every taxonomy's terms (§9). The result is an
-immutable snapshot shared by the next two phases. Only source content is
-classified — archive-generated pages added in Phase 4 are deliberately absent, so
-`collection()`/`taxonomy()` always list authored content.
+Bucket every taxonomy's terms (§9), reading each doc's `terms` (now final after
+the markup `#hashtag` pass). With collections (Phase 2) already cached, the index
+is now fully classified and is **frozen** for the remaining phases. Only source
+content is classified — archive-generated pages added in Phase 6 are deliberately
+absent, so `collection()`/`taxonomy()` always list authored content.
 
-### Phase 4 — `archives` (+ markup)
+### Phase 6 — `archives` (+ markup)
 
 Expand each file in `archives/` into zero or more **view pages** over docs that
 already exist. An archive's frontmatter declares a `kind`:
@@ -189,7 +204,7 @@ Because each archive reads only the frozen classification (never another
 archive's output), archives are mutually independent and run in parallel — there
 is no `order`/`weight` key.
 
-### Phase 5 — `template`
+### Phase 7 — `template`
 
 Render Tera over each document's `content` using a context composed of:
 
@@ -205,17 +220,19 @@ templated identically — nothing downstream needs to know which is which.
 
 ## 7. The Index
 
-A single **in-memory** doc index is the spine of the system, holding all docs
-keyed by `id_path`. Derived listings are computed during `classify` and frozen:
+A single **in-memory** doc index is the spine of the system, holding all source
+docs keyed by `id_path`. Derived listings are computed during classification and
+then frozen:
 
-- **collections** — named saved-query results (§9),
+- **collections** — named saved-query results (§9), computed before markup,
 - **taxonomies** — named classifications (`tags` plus any declared), each a
-  `term → docs` map,
+  `term → docs` map, computed after markup,
 - **backlinks** — the inverted wikilink graph (§8).
 
-The index is populated during `read`, classified into the frozen snapshot during
-`classify`, augmented with archive pages during `archives` (not re-classified),
-and rendered during `template`.
+The index is populated during `read`, classified in two halves (collections
+before markup, taxonomies after), and then **frozen**: archives and the template
+phase read it by shared reference and emit their output to the side, so the index
+is never mutated after classification and there is no corpus-wide clone.
 
 ### 7.1 Taxonomies
 
@@ -275,13 +292,17 @@ learn one model.
 Capabilities:
 
 - **Filter by path** — prefix or, preferably, **glob** (`pages/*.md`).
-- **Filter by tag.**
 - **Order by** `title`, `date`, or `updated`, with sort direction.
+- **Limit** the number of results.
+
+Filtering by term is the job of taxonomies (§7.1), not queries — a collection
+query is pure path-glob + ordering, which keeps it independent of the markup
+phase (so collections classify before markup; see §6).
 
 **Optional compact query language** (under consideration):
 
 ```
-path:pages/*.md, tag:journal order_by:updated sort:desc
+path:pages/*.md order_by:updated sort:desc limit:10
 ```
 
 ### 9.1 Archive specifics

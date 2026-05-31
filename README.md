@@ -143,33 +143,36 @@ Paginated archives append `page/N/` to the landing permalink for pages 2 and up
 
 ## Defaults
 
-Rather than repeat the same frontmatter in every file, declare per-glob
-defaults in `config.yaml` under a `defaults:` key. Each entry maps a path glob
-to frontmatter values that fill keys a document didn't set itself:
+Rather than repeat the same frontmatter in every file, declare defaults for a
+**collection** in `config.yaml` under a `defaults:` key. Each entry names a
+collection (from `collections:`); its values fill keys the collection's members
+didn't set themselves:
 
 ```yaml
+collections:
+  posts:
+    path: "posts/*.md"
 defaults:
-  "posts/*.md":
+  posts:
     permalink: /blog/:yyyy/:mm/:dd/:slug/
     template: post.html
 ```
 
-With the above, every `content/posts/*.md` gets a dated permalink and the
-`post.html` layout without restating either in its frontmatter. This is a
-general mechanism — any frontmatter key can be defaulted, not just
-`permalink`.
+With the above, every member of the `posts` collection gets a dated permalink and
+the `post.html` layout without restating either in its frontmatter. This is a
+general mechanism — any frontmatter key can be defaulted, not just `permalink`.
 
 Rules:
 
 - **A document's own frontmatter always wins.** Defaults only fill keys the
   document left unset.
-- **When several globs match, later entries win.** List broad globs first and
-  more specific ones after.
-- Globs use the same matching as `query` — `*` does not cross `/`; use `**` to
-  recurse (e.g. `posts/**/*.md`).
+- **A `defaults:` key must name a declared collection** — an unknown name is a
+  config error.
+- **When several collections cover a doc, the later `defaults:` entry wins.**
 
-Defaults are applied during the read phase, before permalinks are expanded and
-before bodies are rendered, so they behave exactly as if written inline.
+Defaults are applied after collection membership is computed and before bodies
+are rendered, so they behave exactly as if written inline — including feeding a
+defaulted taxonomy field (e.g. `tags`) into the taxonomies.
 
 ## Templates
 
@@ -224,10 +227,10 @@ collections:
 {% endfor %}
 ```
 
-A collection's query takes: `path` (glob), `tag` (string), `order_by`
-(`title` | `date` | `updated`), `sort` (`asc` | `desc`), `limit` (integer),
-`omit` (array of `id_path` strings to exclude). Default is
-`order_by=date, sort=desc`.
+A collection's query takes: `path` (glob), `order_by` (`title` | `date` |
+`updated`), `sort` (`asc` | `desc`), `limit` (integer), `omit` (array of
+`id_path` strings to exclude). Default is `order_by=date, sort=desc`. (Filtering
+by tag is served by taxonomies — see below.)
 
 ### `taxonomy(...)` — list a taxonomy's terms
 

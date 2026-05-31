@@ -72,6 +72,12 @@ impl DocIndex {
         self.docs.get(id_path)
     }
 
+    /// O(1) mutable lookup of a doc by `id_path`. Used by the defaults phase to
+    /// fill frontmatter on a collection's members.
+    pub fn doc_mut(&mut self, id_path: &Path) -> Option<&mut Doc> {
+        self.docs.get_mut(id_path)
+    }
+
     /// O(1) lookup of a doc's `output_path` by `id_path`, for the URL filters.
     pub fn output_path(&self, id_path: &Path) -> Option<&Path> {
         self.docs.get(id_path).map(|d| d.output_path.as_path())

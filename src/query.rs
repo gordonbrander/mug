@@ -21,7 +21,6 @@ pub enum SortDir {
 #[derive(Debug, Clone)]
 pub struct Query {
     pub path: Option<Glob>,
-    pub tag: Option<String>,
     pub order_by: OrderKey,
     pub sort: SortDir,
     pub limit: Option<usize>,
@@ -32,7 +31,6 @@ impl Default for Query {
     fn default() -> Self {
         Self {
             path: None,
-            tag: None,
             order_by: OrderKey::Date,
             sort: SortDir::Desc,
             limit: None,
@@ -43,7 +41,7 @@ impl Default for Query {
 
 /// Field names accepted by query-style kwargs. Shared with the Tera adapter
 /// in `tera_env::query` so both parsers reject the same typos.
-pub(crate) const KNOWN_KEYS: &[&str] = &["path", "tag", "order_by", "sort", "limit", "omit"];
+pub(crate) const KNOWN_KEYS: &[&str] = &["path", "order_by", "sort", "limit", "omit"];
 
 impl Query {
     /// Build from a YAML map (e.g. the `query:` sub-mapping in a generator's
@@ -77,13 +75,6 @@ impl Query {
                 .build()
                 .map_err(|e| anyhow!("query: invalid glob `{}`: {}", s, e))?;
             q.path = Some(glob);
-        }
-
-        if let Some(v) = m.get("tag") {
-            let s = v
-                .as_str()
-                .ok_or_else(|| anyhow!("query: `tag` must be a string"))?;
-            q.tag = Some(s.to_string());
         }
 
         if let Some(v) = m.get("order_by") {
@@ -166,19 +157,6 @@ pub fn evaluate<'a>(q: &Query, docs: impl IntoIterator<Item = &'a Doc>) -> Vec<&
             if omit.contains(d.id_path.as_path()) {
                 return false;
             }
-            if let Some(tag) = &q.tag {
-                // The `tag` filter matches terms of the built-in `tags`
-                // taxonomy. Match by slug so `tag="My Tag"` and `tag="my-tag"`
-                // are equivalent — the bucket is keyed by the same slug.
-                let slug = slug::slugify(tag);
-                let has = d
-                    .terms
-                    .get(crate::taxonomy::BUILTIN)
-                    .is_some_and(|bucket| bucket.contains_key(&slug));
-                if !has {
-                    return false;
-                }
-            }
             true
         })
         .collect();
@@ -238,7 +216,6 @@ mod tests {
     fn from_yaml_mapping_empty_is_default() {
         let q = Query::from_yaml_mapping(&Mapping::new()).unwrap();
         assert!(q.path.is_none());
-        assert!(q.tag.is_none());
         assert_eq!(q.order_by, OrderKey::Date);
         assert_eq!(q.sort, SortDir::Desc);
         assert!(q.limit.is_none());
@@ -246,12 +223,9 @@ mod tests {
 
     #[test]
     fn from_yaml_mapping_all_fields() {
-        let m = yaml_mapping(
-            "path: \"posts/*.md\"\ntag: journal\norder_by: title\nsort: asc\nlimit: 4\n",
-        );
+        let m = yaml_mapping("path: \"posts/*.md\"\norder_by: title\nsort: asc\nlimit: 4\n");
         let q = Query::from_yaml_mapping(&m).unwrap();
         assert!(q.path.is_some());
-        assert_eq!(q.tag.as_deref(), Some("journal"));
         assert_eq!(q.order_by, OrderKey::Title);
         assert_eq!(q.sort, SortDir::Asc);
         assert_eq!(q.limit, Some(4));
@@ -293,19 +267,6 @@ mod tests {
             doc("pages/c.md", "C", "2025-01-03"),
         ];
         let q = Query::from_yaml_mapping(&yaml_mapping("path: \"posts/*.md\"\n")).unwrap();
-        let results = evaluate(&q, &docs);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].title, "A");
-    }
-
-    #[test]
-    fn evaluate_filters_by_tag() {
-        let mut a = doc("a.md", "A", "2025-01-01");
-        a.terms.entry("tags".into()).or_default().insert("rust".into(), "rust".into());
-        let mut b = doc("b.md", "B", "2025-01-02");
-        b.terms.entry("tags".into()).or_default().insert("other".into(), "other".into());
-        let docs = vec![a, b];
-        let q = Query::from_yaml_mapping(&yaml_mapping("tag: rust\n")).unwrap();
         let results = evaluate(&q, &docs);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "A");

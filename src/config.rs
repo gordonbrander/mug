@@ -1,4 +1,3 @@
-use crate::defaults::Defaults;
 use crate::query::Query;
 use crate::taxonomy::{self, Taxonomy};
 use anyhow::{Context, Result};
@@ -31,12 +30,14 @@ pub struct Config {
     /// with `/`.
     #[serde(skip)]
     pub base_path: String,
-    /// Glob-scoped default frontmatter from the `defaults:` key. Merged into
-    /// each authored doc's frontmatter during the read phase, before fields
-    /// are uplifted and the permalink is expanded.
+    /// Per-collection default frontmatter from the `defaults:` key. Each entry
+    /// names a collection (from `collections:`); its frontmatter values fill keys
+    /// the members of that collection did not set themselves. Applied after
+    /// collection classification and before markup (see `build::defaults`).
+    /// Config order; later entries win on overlap.
     #[serde(skip)]
-    pub defaults: Defaults,
-    /// Named queries from the `collections:` key, each a [`Query`]. The template
+    pub defaults: Vec<(String, Mapping)>,
+    /// Named queries from the `collections:` key, each a [`Query`]. The classify
     /// phase evaluates them once into the `DocIndex` so templates can read them
     /// cheaply via the `collection()` function. Insertion order is the
     /// `config.yaml` order; collection lookup is by name regardless.
@@ -63,7 +64,7 @@ impl Default for Config {
             hashtags: false,
             site_url: None,
             base_path: String::new(),
-            defaults: Defaults::default(),
+            defaults: Vec::new(),
             collections: Vec::new(),
             taxonomies: vec![Taxonomy::new(taxonomy::BUILTIN)],
         }
@@ -107,13 +108,15 @@ impl Config {
             }
             _ => (Mapping::new(), None, None, None),
         };
-        if let Some(map) = defaults_map {
-            config.defaults = Defaults::from_yaml_mapping(&map)
-                .with_context(|| format!("parsing `defaults` in {}", path.display()))?;
-        }
+        // Collections first: `defaults:` entries reference collections by name,
+        // so collections must be parsed before they can be validated.
         if let Some(map) = collections_map {
             config.collections = parse_collections(&map)
                 .with_context(|| format!("parsing `collections` in {}", path.display()))?;
+        }
+        if let Some(map) = defaults_map {
+            config.defaults = parse_defaults(&map, &config.collections)
+                .with_context(|| format!("parsing `defaults` in {}", path.display()))?;
         }
         // Always parse (even when absent) so the built-in `tags` taxonomy is
         // present unless the user explicitly opts out.
@@ -150,6 +153,33 @@ fn parse_collections(map: &Mapping) -> Result<Vec<(String, Query)>> {
         collections.push((name.to_string(), query));
     }
     Ok(collections)
+}
+
+/// Parse the `defaults:` mapping into `(collection name, default frontmatter)`
+/// pairs, preserving `config.yaml` order. Each key must name a collection
+/// declared in `collections:`; each value is a frontmatter mapping whose values
+/// fill keys absent on the collection's members (see `build::defaults`).
+fn parse_defaults(
+    map: &Mapping,
+    collections: &[(String, Query)],
+) -> Result<Vec<(String, Mapping)>> {
+    let mut defaults = Vec::with_capacity(map.len());
+    for (key, value) in map {
+        let name = key
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("defaults keys must be collection names (strings)"))?;
+        if !collections.iter().any(|(n, _)| n == name) {
+            return Err(anyhow::anyhow!(
+                "defaults: `{}` does not name a collection (declare it under `collections:`)",
+                name
+            ));
+        }
+        let frontmatter = value.as_mapping().ok_or_else(|| {
+            anyhow::anyhow!("defaults for `{}` must be a mapping of frontmatter values", name)
+        })?;
+        defaults.push((name.to_string(), frontmatter.clone()));
+    }
+    Ok(defaults)
 }
 
 fn normalize_site_url(s: &str) -> Option<String> {
@@ -285,17 +315,27 @@ mod tests {
         let dir = tempdir();
         let path = write_config(
             &dir,
-            "defaults:\n  \"posts/*.md\":\n    permalink: \":yyyy/:mm/:dd/:slug\"\n",
+            "collections:\n  posts:\n    path: \"posts/*.md\"\ndefaults:\n  posts:\n    permalink: \":yyyy/:mm/:dd/:slug\"\n",
         );
         let (config, _) = Config::load(&path).unwrap();
-        let mut data = Mapping::new();
-        // A matching glob fills the default permalink.
-        assert!(config.defaults.apply(Path::new("posts/hello.md"), &mut data));
+        // Parsed as a (collection name, frontmatter) pair.
+        assert_eq!(config.defaults.len(), 1);
+        let (name, fm) = &config.defaults[0];
+        assert_eq!(name, "posts");
         assert_eq!(
-            data.get(Value::String("permalink".into()))
+            fm.get(Value::String("permalink".into()))
                 .and_then(|v| v.as_str()),
             Some(":yyyy/:mm/:dd/:slug")
         );
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn defaults_referencing_unknown_collection_errors() {
+        let dir = tempdir();
+        // No `collections:` block → `posts` is unknown.
+        let path = write_config(&dir, "defaults:\n  posts:\n    template: post.html\n");
+        assert!(Config::load(&path).is_err());
         cleanup(&dir);
     }
 
@@ -377,8 +417,7 @@ mod tests {
         let dir = tempdir();
         let path = write_config(&dir, "content_dir: foo\n");
         let (config, _) = Config::load(&path).unwrap();
-        let mut data = Mapping::new();
-        assert!(!config.defaults.apply(Path::new("posts/hello.md"), &mut data));
+        assert!(config.defaults.is_empty());
         cleanup(&dir);
     }
 

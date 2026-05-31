@@ -6,25 +6,31 @@ site:
   # Subpath the site is hosted under, e.g. "/blog". Leave empty for root.
   base_path: ""
 
-# Default frontmatter applied by file glob. Values fill keys a document did not
-# set itself (a document's own frontmatter always wins). When several globs
-# match, later entries win. `*` does not cross `/`; use `**` to recurse.
-# defaults:
-#   "posts/*.md":
-#     permalink: ":yyyy/:mm/:dd/:slug"
+# Named collections: saved queries over your content, evaluated once and cached.
+# Read them in templates with `{% for p in collection(name="posts") %}`. Options:
+# path (glob), order_by (title|date|updated), sort (asc|desc), limit, omit.
+collections:
+  posts:
+    path: "posts/*.md"
+    order_by: date
+    sort: desc
+  recent:
+    path: "posts/*.md"
+    order_by: date
+    sort: desc
+    limit: 20
 
-# Named collections: queries evaluated once and cached for cheap template access.
-# Read them with `{% for p in collection(name="posts") %}`. Each takes the same
-# options as a generator query: path (glob), tag, order_by (title|date|updated),
-# sort (asc|desc), limit, omit.
-# collections:
+# Default frontmatter applied to a collection's members. Values fill keys a
+# document didn't set itself (its own frontmatter always wins). Keyed by
+# collection name; when several entries cover a doc, the later one wins.
+# defaults:
 #   posts:
-#     path: "posts/*.md"
-#     order_by: date
-#     sort: desc
-#   recent:
-#     path: "posts/*.md"
-#     limit: 5
-#
-# Tags are exposed as a group keyed by tag slug:
-# `{% for tag, docs in group(name="tags") %}`.
+#     permalink: ":yyyy/:mm/:dd/:slug/"
+#     template: post.html
+
+# Taxonomies: named classifications. The built-in `tags` taxonomy is always
+# present (opt out with `tags: false`). Read a taxonomy in templates with
+# `{% for term, docs in taxonomy(name="tags") %}`, and generate per-term archive
+# pages with a `kind: taxonomy` file in `archives/`.
+# taxonomies:
+#   categories:
