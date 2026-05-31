@@ -113,9 +113,14 @@ collections:
     order_by: date
     sort: desc
 
-# Taxonomies: named classifications. Built-in `tags` is always present.
+# Taxonomies: named classifications, declared as an array of names. Each name is
+# also the frontmatter field docs use to declare their terms.
 taxonomies:
-  categories:
+  - tags
+  - categories
+
+# Extract inline `#hashtags` from Markdown bodies into the `tags` taxonomy.
+hashtags: true
 ```
 
 ## Permalinks
@@ -259,6 +264,39 @@ drop a page's self-link from its own backlinks). Default is
 
 Available in templates only.
 
+### `doc(...)` — look up a single doc
+
+Fetch one document by its `id_path`. Returns `null` for an unknown path (so you
+can guard with `{% if %}` rather than failing the build):
+
+```jinja
+{% set about = doc(id_path="about.md") %}
+{% if about %}<a href="{{ about.id_path | link }}">{{ about.title }}</a>{% endif %}
+```
+
+Available in templates only.
+
+### `dictsort` — iterate a map in key order
+
+Tera's `sort` filter only takes arrays. `map | dictsort` turns a map into an
+array of `{key, value}` objects sorted by key — handy for walking a
+`taxonomy(...)` map deterministically. `sort` is `asc` (default) or `desc`:
+
+```jinja
+{% for entry in taxonomy(name="tags") | dictsort(sort="desc") %}
+  {{ entry.key }}: {{ entry.value | length }}
+{% endfor %}
+```
+
+### `truncate_words` — word-aware truncation
+
+`text | truncate_words(length=N)` truncates at the last whitespace that fits,
+appending `…` when it cuts. Default `length` is 250. Unlike Tera's built-in
+`truncate`, it never splits a word; pair with `striptags` to summarize HTML.
+
+Both `dictsort` and `truncate_words` are available in document bodies and
+templates.
+
 ### URL filters
 
 | Filter         | Input         | Output                                |
@@ -303,22 +341,28 @@ environment. In templates, import them explicitly with `{% import %}`.
 
 ## Taxonomies
 
-A **taxonomy** is a named classification of docs by term. The built-in `tags`
-taxonomy is always present; declare more under `taxonomies:` in `config.yaml`.
-Each doc lists its terms under the taxonomy's frontmatter field (the taxonomy
-name by default):
+A **taxonomy** is a named classification of docs by term. Declare taxonomies as
+an array of names under `taxonomies:` in `config.yaml`. Each name doubles as the
+frontmatter field a doc uses to declare its terms:
 
 ```yaml
 # config.yaml
 taxonomies:
-  categories:        # field defaults to the taxonomy name
-  series:
-    field: serie     # override the frontmatter field
+  - tags
+  - categories
+  - series
 ```
 
-The built-in `tags` is merged in, not replaced — opt out with `tags: false`. A
-doc's memberships live on `page.terms` (e.g. `page.terms.categories`), and
-`taxonomy(name=...)` returns a term-slug → docs map for templates and archives.
+```yaml
+# a document's frontmatter
+categories: [rust, tools]
+```
+
+Nothing is declared by default — even `tags` must be listed to become browsable.
+Inline `#hashtags` are bucketed under the `tags` taxonomy when `hashtags: true`
+is set, so declaring `tags` is what surfaces them. A doc's memberships live on
+`page.terms` (e.g. `page.terms.categories`), and `taxonomy(name=...)` returns a
+term-slug → docs map for templates and archives.
 
 ## Archives
 
