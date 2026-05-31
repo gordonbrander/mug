@@ -1,0 +1,6 @@
+---
+kind: taxonomy
+taxonomy: tags
+permalink: /tags/:term/
+---
+tag:{{ term.slug }}/{{ term.text }} items:{% for item in pagination.items %}{{ item.title }} {% endfor %}

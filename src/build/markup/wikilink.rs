@@ -192,10 +192,10 @@ fn resolve<'a>(
     let mut best: Option<(&DocMeta, usize)> = None;
     for doc in candidates {
         let cand_dir = doc.id_path.parent().unwrap_or(empty);
-        if let Some(p) = prefix {
-            if !prefix_matches(cand_dir, p) {
-                continue;
-            }
+        if let Some(p) = prefix
+            && !prefix_matches(cand_dir, p)
+        {
+            continue;
         }
         let dist = dir_distance(source_dir, cand_dir);
         best = match best {
@@ -219,10 +219,11 @@ mod tests {
     use super::*;
 
     fn source_doc(id_path: &str) -> Doc {
-        let mut d = Doc::default();
-        d.id_path = PathBuf::from(id_path);
-        d.output_path = PathBuf::from(id_path).with_extension("html");
-        d
+        Doc {
+            id_path: PathBuf::from(id_path),
+            output_path: PathBuf::from(id_path).with_extension("html"),
+            ..Default::default()
+        }
     }
 
     fn doc_at(id_path: &str) -> DocMeta {
@@ -230,9 +231,11 @@ mod tests {
     }
 
     fn doc_with_permalink(id_path: &str, output_path: &str) -> DocMeta {
-        let mut d = Doc::default();
-        d.id_path = PathBuf::from(id_path);
-        d.output_path = PathBuf::from(output_path);
+        let d = Doc {
+            id_path: PathBuf::from(id_path),
+            output_path: PathBuf::from(output_path),
+            ..Default::default()
+        };
         DocMeta::from(&d)
     }
 

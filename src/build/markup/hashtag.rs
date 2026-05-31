@@ -2,8 +2,8 @@ use comrak::nodes::{AstNode, NodeValue};
 
 /// Scan the `Text` nodes of a parsed comrak AST for inline `#hashtag`s, strip
 /// each one from the rendered output, and return the raw tag texts (without the
-/// leading `#`). The caller slugifies and de-dups them into `doc.tags` via
-/// [`crate::doc::insert_tag`].
+/// leading `#`). The caller slugifies and de-dups them into the built-in
+/// `tags` bucket of `doc.terms` via [`crate::doc::insert_term`].
 ///
 /// A tag is a `#` that sits at a word boundary — the start of a Text node or
 /// right after whitespace, so `page#section` and `C#` are left alone — followed

@@ -2,14 +2,14 @@ pub mod backlinks;
 pub mod build;
 pub mod command;
 pub mod config;
-pub mod defaults;
 pub mod doc;
+pub mod doc_index;
 pub mod frontmatter;
 pub mod html;
-pub mod index;
 pub mod permalink;
 pub mod query;
 pub mod site_data;
+pub mod taxonomy;
 pub mod tera_env;
 
 use anyhow::Result;

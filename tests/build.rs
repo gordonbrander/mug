@@ -176,8 +176,8 @@ fn query() {
 }
 
 #[test]
-fn generators() {
-    run_build("08_generators");
+fn archives() {
+    run_build("08_archives");
 }
 
 #[test]
@@ -203,6 +203,16 @@ fn defaults() {
 #[test]
 fn query_omit() {
     run_build("14_query_omit");
+}
+
+#[test]
+fn collections_taxonomies() {
+    run_build("15_collections_taxonomies");
+}
+
+#[test]
+fn taxonomies() {
+    run_build("16_taxonomies");
 }
 
 #[test]

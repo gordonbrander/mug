@@ -2,12 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ page.title }} | {{ site.title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ page.title }} | {{ site.title }}{% endblock title %}</title>
 </head>
 <body>
-  <header><h1><a href="/">{{ site.title }}</a></h1></header>
+  <header>
+    <h1><a href="{{ '/' | relative_url }}">{{ site.title }}</a></h1>
+    <nav>
+      <a href="{{ '/' | relative_url }}">Home</a>
+      <a href="{{ '/posts/' | relative_url }}">Posts</a>
+    </nav>
+  </header>
   <main>
-    {{ page.content | safe }}
+    {% block content %}{{ page.content | safe }}{% endblock content %}
   </main>
 </body>
 </html>

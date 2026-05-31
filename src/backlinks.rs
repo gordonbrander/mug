@@ -20,13 +20,18 @@ impl Default for Backlinks {
 }
 
 /// Linear scan over `docs`: collect any whose `links` contain `target`,
-/// then sort. No persistent inverted graph — the spec §11 "fully populated
-/// before listing" invariant is what makes this correct.
-pub fn list_backlinks<'a>(docs: &'a [Doc], target: &Path, b: &Backlinks) -> Vec<&'a Doc> {
+/// then sort. Accepts any `&Doc` iterator (a `&[Doc]` slice or `DocIndex`'s
+/// `HashMap` values), so there is no persistent inverted graph — the spec §11
+/// "fully populated before listing" invariant is what makes this correct.
+pub fn list_backlinks<'a>(
+    docs: impl IntoIterator<Item = &'a Doc>,
+    target: &Path,
+    b: &Backlinks,
+) -> Vec<&'a Doc> {
     let omit: HashSet<&Path> = b.omit.iter().map(PathBuf::as_path).collect();
 
     let mut results: Vec<&Doc> = docs
-        .iter()
+        .into_iter()
         .filter(|d| !omit.contains(d.id_path.as_path()) && d.links.iter().any(|o| o == target))
         .collect();
 
@@ -36,10 +41,13 @@ pub fn list_backlinks<'a>(docs: &'a [Doc], target: &Path, b: &Backlinks) -> Vec<
             OrderKey::Date => a.date.cmp(&b2.date),
             OrderKey::Updated => a.updated.cmp(&b2.updated),
         };
-        match b.sort {
+        let cmp = match b.sort {
             SortDir::Asc => cmp,
             SortDir::Desc => cmp.reverse(),
-        }
+        };
+        // Stable tiebreak on `id_path` for a total order regardless of input
+        // order (the generator path passes a filesystem-walk-ordered `Vec`).
+        cmp.then_with(|| a.id_path.cmp(&b2.id_path))
     });
 
     results
@@ -60,13 +68,14 @@ mod tests {
     }
 
     fn doc(id_path: &str, title: &str, date: &str, links: &[&str]) -> Doc {
-        let mut d = Doc::default();
-        d.id_path = PathBuf::from(id_path);
-        d.title = title.to_string();
-        d.date = at(date);
-        d.updated = at(date);
-        d.links = links.iter().map(PathBuf::from).collect();
-        d
+        Doc {
+            id_path: PathBuf::from(id_path),
+            title: title.to_string(),
+            date: at(date),
+            updated: at(date),
+            links: links.iter().map(PathBuf::from).collect(),
+            ..Default::default()
+        }
     }
 
     #[test]

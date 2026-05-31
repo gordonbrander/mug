@@ -1,9 +1,0 @@
----
-permalink: /blog/page-:page/
-per_page: 2
-query:
-  path: "posts/*.md"
-  order_by: date
-  sort: desc
----
-page {{ pagination.current }}/{{ pagination.total }}|prev:{{ pagination.prev_url | default(value="-") }}|next:{{ pagination.next_url | default(value="-") }}|{% for item in pagination.items %}{{ item.title }} {% endfor %}

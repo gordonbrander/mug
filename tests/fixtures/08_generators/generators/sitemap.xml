@@ -1,6 +1,0 @@
----
-permalink: /sitemap.xml
-weight: 9999
----
-{% for item in pagination.items %}{{ item.output_path }}
-{% endfor %}

@@ -1,0 +1,7 @@
+---
+kind: taxonomy
+taxonomy: categories
+permalink: /categories/:term/
+per_page: 1
+---
+term:{{ term.slug }}/{{ term.text }} page {{ pagination.current }}/{{ pagination.total }} prev:{{ pagination.prev_url | default(value="-") }} next:{{ pagination.next_url | default(value="-") }} items:{% for item in pagination.items %}{{ item.title }} {% endfor %}

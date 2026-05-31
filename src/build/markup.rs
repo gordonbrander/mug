@@ -3,8 +3,8 @@ pub(crate) mod wikilink;
 
 use crate::config::Config;
 use crate::doc::{Doc, DocKind, DocMeta};
+use crate::doc_index::DocIndex;
 use crate::html as html_utils;
-use crate::index::Index;
 use crate::site_data::SiteData;
 use crate::tera_env::{MarkupEnv, build_markup_env};
 use anyhow::{Context, Result};
@@ -19,7 +19,7 @@ const SUMMARY_MAX_CHARS: usize = 250;
 /// wikilinks on the AST (populating `doc.links`), and renders to HTML.
 /// Wikilink target resolution uses `env.stem_index`, the frozen stem→candidate
 /// grouping built when the env was constructed. Exposed publicly so
-/// `generate::run` can apply the same transformation to its emitted docs.
+/// `archive::run` can apply the same transformation to its emitted docs.
 pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Result<()> {
     let mut ctx = tera::Context::new();
     ctx.insert("page", &*doc);
@@ -27,6 +27,9 @@ pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Resul
     ctx.insert("data", &site_data.data);
     if let Some(pagination) = doc.data.get("pagination") {
         ctx.insert("pagination", pagination);
+    }
+    if let Some(term) = doc.data.get("term") {
+        ctx.insert("term", term);
     }
 
     // Tera over the body string runs unescaped (the one-off template has
@@ -56,14 +59,19 @@ pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Resul
             let arena = comrak::Arena::new();
             let root = comrak::parse_document(&arena, &rendered, &env.options);
             doc.links = wikilink::resolve_in_ast(root, doc, &env.stem_index);
-            // Inline `#hashtag`s (opt-in): extracted into `doc.tags` and
+            // Inline `#hashtag`s (opt-in): extracted into the built-in `tags`
+            // bucket of `doc.terms` and
             // stripped from the body. Tags added here land too late for this
             // doc's own body Tera (already rendered above) but are visible to
             // the generate phase (live index) and the template phase (its
             // snapshot is cloned after markup) — same lifecycle as `doc.links`.
             if env.hashtags {
+                let bucket = doc
+                    .terms
+                    .entry(crate::taxonomy::BUILTIN.to_string())
+                    .or_default();
                 for text in hashtag::extract_in_ast(root) {
-                    crate::doc::insert_tag(&mut doc.tags, &text);
+                    crate::doc::insert_term(bucket, &text);
                 }
             }
             let mut plugins = comrak::options::Plugins::default();
@@ -85,6 +93,23 @@ pub fn render(env: &mut MarkupEnv, site_data: &SiteData, doc: &mut Doc) -> Resul
     }
 
     Ok(())
+}
+
+pub fn run(config: &Config, site_data: &SiteData, index: &mut DocIndex) -> Result<()> {
+    // Frozen `DocMeta` view of the index for wikilink resolution and the
+    // URL filters. The projection drops `content`/`links`/`data`/
+    // `template`, so the type system enforces that the markup phase can't
+    // read another doc's body or stale markup-phase state.
+    let snapshot: Arc<Vec<DocMeta>> = Arc::new(index.to_doc_metas());
+    let env = build_markup_env(config, snapshot.clone())?;
+    // Each doc renders independently — it mutates only its own fields, while
+    // `env` (Tera, comrak options, syntect, stem index) and `site_data` are
+    // read-only. `render_str` needs `&mut Tera`, so each Rayon worker gets its
+    // own clone of the env via `try_for_each_init` (cloned once per worker,
+    // not per doc).
+    index
+        .par_docs_mut()
+        .try_for_each_init(|| env.clone(), |env, doc| render(env, site_data, doc))
 }
 
 #[cfg(test)]
@@ -151,6 +176,9 @@ mod tests {
                 .to_string(),
             data,
         );
+        // Frontmatter summary is uplifted at read time; mirror that here so the
+        // markup fallback sees a non-empty summary and leaves it untouched.
+        doc.uplift_frontmatter(&[]);
         render_doc(&mut doc);
         assert_eq!(doc.summary, "Hand-written blurb.");
     }
@@ -176,23 +204,4 @@ mod tests {
         render_doc(&mut doc);
         assert_eq!(doc.summary, "");
     }
-}
-
-pub fn run(config: &Config, site_data: &SiteData, index: &mut Index) -> Result<()> {
-    // Frozen `DocMeta` view of the index for wikilink resolution and the
-    // URL filters. The projection drops `content`/`links`/`data`/
-    // `template`, so the type system enforces that the markup phase can't
-    // read another doc's body or stale markup-phase state.
-    let snapshot: Arc<Vec<DocMeta>> =
-        Arc::new(index.docs.iter().map(DocMeta::from).collect());
-    let env = build_markup_env(config, snapshot.clone())?;
-    // Each doc renders independently — it mutates only its own fields, while
-    // `env` (Tera, comrak options, syntect, stem index) and `site_data` are
-    // read-only. `render_str` needs `&mut Tera`, so each Rayon worker gets its
-    // own clone of the env via `try_for_each_init` (cloned once per worker,
-    // not per doc). `par_iter_mut` preserves doc order, so output is identical.
-    index
-        .docs
-        .par_iter_mut()
-        .try_for_each_init(|| env.clone(), |env, doc| render(env, site_data, doc))
 }

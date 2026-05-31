@@ -14,11 +14,12 @@ sensible defaults, and needs zero config to do something useful.
 - **Customization is data, not code.** Everything that varies between sites is
   expressed in `config.yaml`, per-document frontmatter, and Tera templates.
   Because Rust is compiled, we deliberately avoid any embedded scripting layer.
-- **One mechanism, not many.** There is no special-cased notion of "section,"
-  "collection,". Collections are produced on demand by *querying*
-  and *globbing* over a single in-memory index during the generate/template
-  phases. RSS feeds, sitemaps, and tag archives are all just *generated pages*,
-  not bespoke subsystems.
+- **Few mechanisms, composed.** Source content is classified once into named
+  **collections** (saved queries) and **taxonomies** (named classifications such
+  as `tags`), frozen, and then read by templates and by **archives** — files in
+  `archives/` that fan a collection or taxonomy out into list/term pages. RSS
+  feeds and tag archives are just archives; a sitemap is an ordinary content page
+  that iterates a collection. No bespoke per-feature subsystems.
 - **A small, predictable surface area.** Only three input formats (Markdown,
   raw HTML, YAML), one template engine (Tera), and a fully-rendered in-memory
   corpus that downstream phases can rely on.
@@ -42,7 +43,7 @@ sensible defaults, and needs zero config to do something useful.
 
 ```
 content/        # Authored documents (.md, .html, .yaml). Render to their own paths.
-generators/     # Templates whose frontmatter describes a query → fan out into pages.
+archives/       # Templates whose frontmatter declares a kind (collection|taxonomy) → fan out into archive pages.
 templates/      # Tera layouts/partials/macros referenced by documents.
 data/           # YAML files mixed into the global data cascade.
 static/         # Copied verbatim into the build output.
@@ -81,7 +82,7 @@ where noted, with defined fallbacks.
 | `template`    | Uplifted from frontmatter (`template`).                                          |
 | `title`       | Uplifted from frontmatter; defaults to `""`.                                     |
 | `content`     | The rendered body (HTML after the markup phase). See §6.                         |
-| `tags`        | Slug → display-text map. Uplifted from frontmatter (and inline `#hashtag`s when enabled); defaults to `{}`. See §5.2. |
+| `terms`       | Term memberships: `taxonomy → (slug → display-text)`. Uplifted from each taxonomy's frontmatter field (and inline `#hashtag`s feed the built-in `tags` taxonomy when enabled); defaults to `{}`. See §5.2 and §7.1. |
 | `date`        | `date` frontmatter → file created time → file updated time.                      |
 | `updated`     | `updated` frontmatter → file updated time.                                       |
 | `data`        | The verbatim frontmatter map (everything, including the uplifted keys).          |
@@ -107,8 +108,9 @@ resolve `permalink`-based links (see §6.1).
 value** (e.g. `My Tag` → `my-tag: "My Tag"`). Keying by slug deduplicates tags
 that slugify identically and gives templates both a URL-safe slug and the
 original text; iteration is sorted by slug for deterministic output. Templates
-iterate `{% for slug, text in page.tags %}`, and `query(tag=…)` matches by slug,
-so `tag="My Tag"` and `tag="my-tag"` are equivalent (see §9).
+iterate `{% for slug, text in page.terms.tags %}`. Listing docs by tag is done
+through the `tags` taxonomy — `taxonomy(name="tags")` and `kind: taxonomy`
+archives (§7.1) — not a query filter.
 
 Tags come from the frontmatter `tags:` sequence. Optionally — when
 `hashtags: true` is set in `config.yaml` — the markup phase also scans Markdown
@@ -139,7 +141,21 @@ Walk `content/`, classify files, parse frontmatter, compute `id_path` and
 `output_path`, and construct `Doc` structs. Bodies are *not* rendered yet.
 Load `data/` into the data cascade. This phase populates the index keys (§7).
 
-### Phase 2 — `markup`
+### Phase 2 — `classify` (collections)
+
+Evaluate every `collections:` query and cache its membership (§9). Collection
+membership is pure frontmatter metadata, so it is available before any body is
+rendered. Running it here lets the next phase target a collection's members.
+
+### Phase 3 — `defaults`
+
+Apply per-collection default frontmatter from the `defaults:` config block. Each `defaults:` entry names a
+collection; its values fill keys the collection's members did not set themselves
+(the document's own frontmatter always wins). Because defaults land before
+markup, a defaulted taxonomy field (e.g. `tags`) is seen by taxonomy
+classification, and a defaulted `permalink`/`date` is reflected in `output_path`.
+
+### Phase 4 — `markup`
 
 Render each document's body to its final `content` (HTML). This phase runs Tera
 **with a restricted configuration** — index-based filters such as `query` and
@@ -165,43 +181,76 @@ can expose a **`permalink` filter** that expands a document's `id_path` into its
 `output_path`. This is how authored content links to other content without
 hardcoding output URLs (and it is the resolution target for wikilinks; see §8).
 
-### Phase 3 — `generate` (+ markup)
+### Phase 5 — `classify` (taxonomies)
 
-Expand each template in `generators/` into zero or more **virtual pages**. A
-generator's frontmatter declares a query (§9), pagination, and an output-path
-pattern; the generator fans out into concrete `Doc`-shaped descriptors,
-each carrying its bound query results and pagination context. These descriptors
-are markup-processed like authored content and **join the index**.
+Bucket every taxonomy's terms (§9), reading each doc's `terms` (now final after
+the markup `#hashtag` pass). With collections (Phase 2) already cached, the index
+is now fully classified and is **frozen** for the remaining phases. Only source
+content is classified — archive-generated pages added in Phase 6 are deliberately
+absent, so `collection()`/`taxonomy()` always list authored content.
 
-Generators carry an integer **`order`** key (§9.1) so that generators which must
-observe the output of *other* generators (e.g. a sitemap) can run last.
+### Phase 6 — `archives` (+ markup)
 
-### Phase 4 — `template`
+Expand each file in `archives/` into zero or more **view pages** over docs that
+already exist. An archive's frontmatter declares a `kind`:
+
+- **`collection`** — paginate the named collection into list pages.
+- **`taxonomy`** — emit one (optionally paginated) archive page per term.
+
+The page-1 URL is the archive's `permalink` verbatim; pages ≥2 append a
+`page/N/` segment. Emitted pages are markup-processed like authored content and
+**join the live index** for rendering/writing, but are *not* re-classified.
+Because each archive reads only the frozen classification (never another
+archive's output), archives are mutually independent and run in parallel — there
+is no `order`/`weight` key.
+
+### Phase 7 — `template`
 
 Render Tera over each document's `content` using a context composed of:
 
-- the document and its `data`,
-- site-wide data (`config.yaml` + the `data/` cascade),
-- any generated/pagination data bound to the page.
+- the document and its `data` (plus `pagination`/`term` for archive pages),
+- site-wide data (`config.yaml` + the `data/` cascade).
 
-In this phase the **full filter set is available**, including the index-backed
-`query` and `backlinks` filters. The template phase is uniform: authored pages
-and generated pages are templated identically — nothing downstream needs to know
-which is which.
+In this phase the **full function set is available**, including the
+classification-backed `collection()`/`taxonomy()` functions and the `backlinks`
+filter. The template phase is uniform: authored pages and archive pages are
+templated identically — nothing downstream needs to know which is which.
 
 ---
 
 ## 7. The Index
 
-A single **in-memory, mutable** index is the spine of the system. Docs are
-indexed by:
+A single **in-memory** doc index is the spine of the system, holding all source
+docs keyed by `id_path`. Derived listings are computed during classification and
+then frozen:
 
-- **path** — for prefix/glob lookups,
-- **tag** — for tag-based collections,
-- **backlink** — the inverted wikilink graph (§8).
+- **collections** — named saved-query results (§9), computed before markup,
+- **taxonomies** — named classifications (`tags` plus any declared), each a
+  `term → docs` map, computed after markup,
+- **backlinks** — the inverted wikilink graph (§8).
 
-The index is populated during `read`, augmented during `generate`, and queried
-during `template`.
+The index is populated during `read`, classified in two halves (collections
+before markup, taxonomies after), and then **frozen**: archives and the template
+phase read it by shared reference and emit their output to the side, so the index
+is never mutated after classification and there is no corpus-wide clone.
+
+### 7.1 Taxonomies
+
+A **taxonomy** is a named classification of docs. The built-in `tags` taxonomy is
+always present; declare more under `taxonomies:` in `config.yaml`:
+
+```yaml
+taxonomies:
+  categories:          # field defaults to the taxonomy name
+  series:
+    field: serie       # override the frontmatter field
+```
+
+The built-in `tags` is merged in, not replaced (opt out with `tags: false`). Each
+doc lists its terms under the taxonomy's frontmatter field; they are uplifted into
+`doc.terms` (`taxonomy → slug → display text`). Templates read a whole taxonomy
+with `taxonomy(name="tags")` (`term → docs`), and `kind: taxonomy` archives emit
+a page per term.
 
 ---
 
@@ -236,45 +285,57 @@ the reverse direction (which pages link *to* this one) is queryable. A
 
 ## 9. Querying
 
-The same query semantics drive both the **`query` template filter** and
-**generator** definitions, so authors learn one model.
+The same query semantics drive both the `collections:` definitions in
+`config.yaml` and (indirectly, via named collections) the archives, so authors
+learn one model.
 
 Capabilities:
 
 - **Filter by path** — prefix or, preferably, **glob** (`pages/*.md`).
-- **Filter by tag.**
 - **Order by** `title`, `date`, or `updated`, with sort direction.
+- **Limit** the number of results.
+
+Filtering by term is the job of taxonomies (§7.1), not queries — a collection
+query is pure path-glob + ordering, which keeps it independent of the markup
+phase (so collections classify before markup; see §6).
 
 **Optional compact query language** (under consideration):
 
 ```
-path:pages/*.md, tag:journal order_by:updated sort:desc
+path:pages/*.md order_by:updated sort:desc limit:10
 ```
 
-### 9.1 Generation specifics
+### 9.1 Archive specifics
 
-- Generators reuse the query syntax/parameters above to build their collection.
+An **archive** (file in `archives/`) declares a `kind` and names a classification:
+
+- **`kind: collection`** + **`collection:`** — paginate the named collection.
+- **`kind: taxonomy`** + **`taxonomy:`** — one run per term of the named taxonomy;
+  `:term` in the `permalink` is the term slug, and the body/template receives a
+  `term` (`slug`, `text`) context.
 - **`per_page`** — items per output page; defaults to infinity (single page).
-  Fan-out by page produces the paginated descriptors, each receiving a
-  pagination context (current page, total pages, prev/next URLs, item slice).
-- **`weight`** (integer) — controls generator execution order within phase 3.
-  Generators that must see other generators' output set a high value; e.g. a
-  **sitemap** uses `weight: 9999` to run last and observe everything emitted
-  before it. (Implementation note: this field was originally named `order`
-  in this spec; renamed to `weight` to disambiguate from `query.order_by`.)
+  Each page receives a `pagination` context (current page, total pages, prev/next
+  URLs, item slice).
+- **`permalink`** is the page-1 (landing) URL; pages ≥2 append `page/N/`.
+
+Archives never observe one another's output (only the frozen classification of
+source content), so there is no execution-order key — they run in parallel.
 
 ---
 
-## 10. Built-in Generators (Scaffolded)
+## 10. Built-in Archives (Scaffolded)
 
-These are not special-cased subsystems — they are ordinary generator templates
-that the tool can **scaffold** for the user:
+These are not special-cased subsystems — they are ordinary files the tool can
+**scaffold** for the user:
 
-- **RSS** — a generator querying recent content, emitting a feed document.
-- **Sitemap** — a high-`order` generator listing all prior output.
+- **RSS** — a `kind: collection` archive over a `recent` collection, emitting a
+  single feed document.
+- **Sitemap** — an ordinary *content* page (`content/sitemap.html`) that iterates
+  a collection via `collection()`. It is content, not an archive, because a
+  sitemap lists canonical pages, not paginated archive pages.
 
-Because they are just files in `generators/`, users may edit or delete them
-freely. The "automatic" part is purely scaffolding convenience.
+Because they are just files in `archives/` and `content/`, users may edit or
+delete them freely. The "automatic" part is purely scaffolding convenience.
 
 ---
 
@@ -283,11 +344,19 @@ freely. The "automatic" part is purely scaffolding convenience.
 These are explicit design decisions, recorded so they are chosen rather than
 stumbled into:
 
-1. **`query()` vs. incremental builds.** Any page may depend on any other,
-   invisibly, through a query. This makes correct incremental rebuilding hard.
+1. **Classification vs. incremental builds.** Any page may list any other via
+   `collection()`/`taxonomy()`. This makes correct incremental rebuilding hard.
    v1 is full-rebuild only. *If* incrementality is added later, each page's
-   query inputs must be logged so invalidation can flow from them — cheap to
-   anticipate now, expensive to retrofit.
+   classification inputs must be logged so invalidation can flow from them —
+   cheap to anticipate now, expensive to retrofit.
+
+4. **Generated pages are excluded from classification.** Archives read the frozen
+   classification of *source* content and append view pages that are never
+   re-classified. This makes archives order-independent and parallel by
+   construction, and avoids the feedback-loop hazards that other SSGs hit when
+   generated pages re-enter the collections that drive generation. A whole-site
+   listing (e.g. a sitemap) is therefore an authored content page, not an
+   archive.
 
 2. **Macros expand before markup render.** Tera macros run *before*
    Markdown rendering, producing a flattened string that can be rendered once.
@@ -295,10 +364,10 @@ stumbled into:
    deferred-rendering circularity that more complex generators have hit.
    Given the Markdown-and-raw-HTML-only scope, this is a comfortable line to hold.
 
-3. **Restricted markup-phase Tera.** Index-backed filters (`query`,
-   `backlinks`) are unavailable during `markup` and available during
-   `template`. This enforces the index-before-listing invariant by construction
-   rather than by discipline.
+3. **Restricted markup-phase Tera.** Classification-backed functions
+   (`collection`, `taxonomy`, `backlinks`) are unavailable during `markup` and
+   available during `template`. This enforces the classify-before-listing
+   invariant by construction rather than by discipline.
 
 ---
 
@@ -317,6 +386,6 @@ stumbled into:
 
 - `build` — run the full pipeline once into the output directory.
 - `watch` — optional watch-and-rebuild loop (full rebuild on change in v1).
-- `new` / scaffolding — generate starter RSS and sitemap generators, etc.
+- `new` / scaffolding — generate a starter RSS archive and sitemap page, etc.
 
 All behavioral configuration lives in files, not flags.

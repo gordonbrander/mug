@@ -1,0 +1,1 @@
+<h1>Posts</h1><ul>{% for p in collection(name="posts") %}<li>{{ p.title }}</li>{% endfor %}</ul><h1>Tags</h1>{% for tag, docs in taxonomy(name="tags") %}<h2>{{ tag }}</h2><ul>{% for d in docs %}<li>{{ d.title }}</li>{% endfor %}</ul>{% endfor %}

@@ -39,7 +39,7 @@ where
     let dirs = [
         &config.content_dir,
         &config.templates_dir,
-        &config.generators_dir,
+        &config.archives_dir,
         &config.data_dir,
         &config.static_dir,
     ];

@@ -1,4 +1,3 @@
-use crate::defaults::Defaults;
 use crate::frontmatter;
 use crate::permalink;
 use anyhow::{Context, Result};
@@ -17,13 +16,14 @@ pub struct Doc {
     pub title: String,
     pub summary: String,
     pub content: String,
-    /// Tags keyed by slug → display text. Built from frontmatter `tags:` and,
-    /// when the `hashtags` config flag is set, from inline `#hashtag`s found in
-    /// the body during the markup phase. A `BTreeMap` so iteration (and thus
-    /// rendered output) is deterministic, sorted by slug, and tags that
-    /// slugify identically collapse to one entry. Serializes to a slug→text
-    /// object for templates: `{% for slug, text in page.tags %}`.
-    pub tags: BTreeMap<String, String>,
+    /// Term memberships, keyed by taxonomy name → (slug → display text). Built
+    /// from each taxonomy's frontmatter field (e.g. `tags:`, `categories:`) and,
+    /// for the built-in `tags` taxonomy when the `hashtags` config flag is set,
+    /// from inline `#hashtag`s found in the body during the markup phase. The
+    /// inner `BTreeMap` keeps iteration deterministic (sorted by slug) and
+    /// collapses terms that slugify identically. Serializes to a nested object
+    /// for templates: `{% for slug, text in page.terms.tags %}`.
+    pub terms: BTreeMap<String, BTreeMap<String, String>>,
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     pub data: Mapping,
@@ -43,7 +43,7 @@ pub struct DocMeta {
     pub output_path: PathBuf,
     pub title: String,
     pub summary: String,
-    pub tags: BTreeMap<String, String>,
+    pub terms: BTreeMap<String, BTreeMap<String, String>>,
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
 }
@@ -55,7 +55,7 @@ impl From<&Doc> for DocMeta {
             output_path: doc.output_path.clone(),
             title: doc.title.clone(),
             summary: doc.summary.clone(),
-            tags: doc.tags.clone(),
+            terms: doc.terms.clone(),
             date: doc.date,
             updated: doc.updated,
         }
@@ -94,7 +94,7 @@ impl Default for Doc {
             title: String::new(),
             summary: String::new(),
             content: String::new(),
-            tags: BTreeMap::new(),
+            terms: BTreeMap::new(),
             date: DateTime::<Utc>::UNIX_EPOCH,
             updated: DateTime::<Utc>::UNIX_EPOCH,
             data: Mapping::new(),
@@ -104,36 +104,47 @@ impl Default for Doc {
 }
 
 impl Doc {
-    /// Assemble a Doc from already-split inputs. Uplifts `title`, `template`,
-    /// `tags`, `date`, `updated` from `data` per spec §5. No filesystem
-    /// fallback for dates — that's `load`'s job.
+    /// Assemble a Doc from already-split inputs, holding the raw frontmatter in
+    /// `data` and the unrendered body in `content`. Derived fields (`title`,
+    /// `terms`, `date`, …) stay at their defaults until [`Doc::uplift_frontmatter`] runs;
+    /// `output_path` starts as the path-mirroring default so an un-uplifted Doc
+    /// still has a sane location.
     pub fn new(id_path: PathBuf, content: String, data: Mapping) -> Doc {
-        let title = uplift_string(&data, "title").unwrap_or_default();
-        let summary = uplift_string(&data, "summary").unwrap_or_default();
-        let template = uplift_string(&data, "template");
-        let tags = uplift_tags(&data);
-        let date = parse_date(data.get("date")).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        let updated = parse_date(data.get("updated")).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        let output_path = resolve_output_path(&id_path, &data, &date);
+        let output_path = permalink::default_for(&id_path);
         Doc {
             id_path,
             output_path,
-            template,
-            title,
-            summary,
             content,
-            tags,
-            date,
-            updated,
             data,
-            links: Vec::new(),
+            ..Doc::default()
         }
     }
 
-    /// Split frontmatter out of `source`, parse it as YAML, and build a Doc.
-    /// Returns Err only if a present frontmatter block contains malformed
-    /// YAML; missing or unterminated frontmatter is silently treated as no
-    /// frontmatter (see `frontmatter::split`).
+    /// Derive the metadata fields from `self.data` (spec §5): `title`, `summary`,
+    /// `template`, `terms` (one bucket per taxonomy, read from its frontmatter
+    /// field), and `output_path` (expanding any `permalink`). `date`/`updated`
+    /// are overwritten **only** when frontmatter supplies a parseable value, so
+    /// any pre-seeded value (the filesystem dates set by [`Doc::load`], or the
+    /// result of an earlier uplift before [`Doc::apply_defaults`]) is preserved
+    /// otherwise.
+    pub fn uplift_frontmatter(&mut self, taxonomies: &[String]) {
+        self.title = uplift_string(&self.data, "title").unwrap_or_default();
+        self.summary = uplift_string(&self.data, "summary").unwrap_or_default();
+        self.template = uplift_string(&self.data, "template");
+        self.terms = uplift_terms(&self.data, taxonomies);
+        if let Some(date) = parse_date(self.data.get("date")) {
+            self.date = date;
+        }
+        if let Some(updated) = parse_date(self.data.get("updated")) {
+            self.updated = updated;
+        }
+        self.output_path = resolve_output_path(&self.id_path, &self.data, &self.date);
+    }
+
+    /// Split frontmatter out of `source` and build a Doc (un-uplifted; call
+    /// [`Doc::uplift_frontmatter`] to derive fields). Returns Err only if a present
+    /// frontmatter block contains malformed YAML; missing or unterminated
+    /// frontmatter is silently treated as no frontmatter (see `frontmatter::split`).
     pub fn parse(id_path: PathBuf, source: &str) -> Result<Doc> {
         let (data, body) = frontmatter::parse(source)?;
         Ok(Doc::new(id_path, body, data))
@@ -141,7 +152,8 @@ impl Doc {
 
     /// Build a Doc from a `.yaml` source: the whole file is the data map; the
     /// `content` field (if present and a string) becomes the body. Non-string
-    /// or missing `content` defaults to an empty body.
+    /// or missing `content` defaults to an empty body. Un-uplifted; call
+    /// [`Doc::uplift_frontmatter`] to derive fields.
     pub fn parse_yaml(id_path: PathBuf, source: &str) -> Result<Doc> {
         let (data, content) = frontmatter::parse_yaml(source)?;
         Ok(Doc::new(id_path, content, data))
@@ -156,45 +168,51 @@ impl Doc {
         DocKind::from(self.id_path.as_path())
     }
 
-    /// Read `content_dir.join(id_path)` from disk, parse it, and apply the
-    /// filesystem-based fallback chain for `date` (created → modified) and
-    /// `updated` (modified) when frontmatter didn't supply a parseable value.
-    pub fn load(content_dir: &Path, id_path: &Path, defaults: &Defaults) -> Result<Doc> {
+    /// Read `content_dir.join(id_path)` from disk, parse it, seed `date`/`updated`
+    /// from filesystem metadata, then uplift frontmatter — which overrides those
+    /// dates when the frontmatter supplies parseable values. So frontmatter wins
+    /// and the filesystem fills in (`date`: created → modified; `updated`: modified).
+    pub fn load(content_dir: &Path, id_path: &Path, taxonomies: &[String]) -> Result<Doc> {
         let fs_path = content_dir.join(id_path);
         let source = fs::read_to_string(&fs_path)
             .with_context(|| format!("could not read {}", fs_path.display()))?;
         let meta = fs::metadata(&fs_path)
             .with_context(|| format!("could not stat {}", fs_path.display()))?;
-        let (mut data, body) = match DocKind::from(id_path) {
+        let (data, body) = match DocKind::from(id_path) {
             DocKind::Yaml => frontmatter::parse_yaml(&source),
             _ => frontmatter::parse(&source),
         }
         .with_context(|| format!("could not parse {}", fs_path.display()))?;
-        // Merge config defaults into the raw frontmatter before constructing
-        // the Doc, so uplifted fields and the expanded permalink reflect them.
-        defaults.apply(id_path, &mut data);
         let mut doc = Doc::new(id_path.to_path_buf(), body, data);
-
-        let date_from_fs = parse_date(doc.data.get("date")).is_none();
-        if date_from_fs {
-            doc.date = meta
-                .created()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .or_else(|| meta.modified().ok().map(DateTime::<Utc>::from))
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        }
-        if parse_date(doc.data.get("updated")).is_none() {
-            doc.updated = meta
-                .modified()
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        }
-        if date_from_fs {
-            doc.output_path = resolve_output_path(&doc.id_path, &doc.data, &doc.date);
-        }
+        // Seed dates from the filesystem (created → modified for `date`, modified
+        // for `updated`). `uplift_frontmatter` then overwrites either one when
+        // frontmatter supplies a parseable value, and computes `output_path`
+        // against the resulting date — so frontmatter wins, filesystem fills in.
+        doc.date = meta
+            .created()
+            .ok()
+            .map(DateTime::<Utc>::from)
+            .or_else(|| meta.modified().ok().map(DateTime::<Utc>::from))
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        doc.updated = meta
+            .modified()
+            .ok()
+            .map(DateTime::<Utc>::from)
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        doc.uplift_frontmatter(taxonomies);
         Ok(doc)
+    }
+
+    /// Merge per-collection `defaults` into this doc's frontmatter, filling only
+    /// keys the doc didn't set itself (the doc's own frontmatter always wins).
+    /// This only touches `self.data`; the caller re-derives fields by calling
+    /// [`Doc::uplift_frontmatter`] afterwards (see `build::defaults`).
+    pub fn apply_defaults(&mut self, defaults: &Mapping) {
+        for (k, v) in defaults {
+            if !self.data.contains_key(k) {
+                self.data.insert(k.clone(), v.clone());
+            }
+        }
     }
 }
 
@@ -209,29 +227,38 @@ fn uplift_string(data: &Mapping, key: &str) -> Option<String> {
     data.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-fn uplift_tags(data: &Mapping) -> BTreeMap<String, String> {
-    let mut tags = BTreeMap::new();
-    let Some(Value::Sequence(seq)) = data.get("tags") else {
-        return tags;
-    };
-    for v in seq {
-        if let Some(text) = v.as_str() {
-            insert_tag(&mut tags, text);
+/// Build the per-doc `terms` map: one bucket per configured taxonomy, read from
+/// that taxonomy's frontmatter `field` as a string sequence. A bucket is always
+/// created for every taxonomy (even when empty) so the shape is stable for
+/// templates and the markup-phase hashtag pass can find `terms["tags"]`.
+fn uplift_terms(
+    data: &Mapping,
+    taxonomies: &[String],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut terms: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for name in taxonomies {
+        let bucket = terms.entry(name.clone()).or_default();
+        if let Some(Value::Sequence(seq)) = data.get(name.as_str()) {
+            for v in seq {
+                if let Some(text) = v.as_str() {
+                    insert_term(bucket, text);
+                }
+            }
         }
     }
-    tags
+    terms
 }
 
 /// Slugify `text` and insert it under that slug → display text, first-write-
-/// wins (so a frontmatter tag's display text survives a later slug-colliding
+/// wins (so a frontmatter term's display text survives a later slug-colliding
 /// inline hashtag). No-op for text that slugifies to empty. Shared by
-/// `uplift_tags` and the markup-phase hashtag pass.
-pub(crate) fn insert_tag(tags: &mut BTreeMap<String, String>, text: &str) {
+/// `uplift_terms` and the markup-phase hashtag pass.
+pub(crate) fn insert_term(bucket: &mut BTreeMap<String, String>, text: &str) {
     let slug = slug::slugify(text);
     if slug.is_empty() {
         return;
     }
-    tags.entry(slug).or_insert_with(|| text.to_string());
+    bucket.entry(slug).or_insert_with(|| text.to_string());
 }
 
 pub(crate) fn parse_date(value: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -260,6 +287,18 @@ mod tests {
         m
     }
 
+    /// The default taxonomy set used in most tests: just built-in `tags`.
+    fn tax() -> Vec<String> {
+        vec!["tags".to_string()]
+    }
+
+    /// Construct a Doc and uplift its metadata — the read-phase pairing.
+    fn uplifted(id_path: &str, content: &str, data: Mapping, taxonomies: &[String]) -> Doc {
+        let mut d = Doc::new(PathBuf::from(id_path), content.to_string(), data);
+        d.uplift_frontmatter(taxonomies);
+        d
+    }
+
     #[test]
     fn default_doc_uses_unix_epoch() {
         let d = Doc::default();
@@ -267,36 +306,36 @@ mod tests {
         assert_eq!(d.updated, DateTime::<Utc>::UNIX_EPOCH);
         assert_eq!(d.title, "");
         assert_eq!(d.summary, "");
-        assert!(d.tags.is_empty());
+        assert!(d.terms.is_empty());
         assert!(d.template.is_none());
     }
 
     #[test]
-    fn new_uplifts_summary_from_frontmatter() {
+    fn uplift_frontmatter_summary_from_frontmatter() {
         let data = map_from(&[("summary", Value::String("Hand-written blurb.".into()))]);
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), data);
+        let d = uplifted("p.md", "", data, &tax());
         assert_eq!(d.summary, "Hand-written blurb.");
     }
 
     #[test]
-    fn new_defaults_summary_to_empty_when_missing() {
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new());
+    fn uplift_frontmatter_defaults_summary_to_empty_when_missing() {
+        let d = uplifted("p.md", "", Mapping::new(), &tax());
         assert_eq!(d.summary, "");
     }
 
     #[test]
-    fn new_uplifts_title_and_template() {
+    fn uplift_frontmatter_title_and_template() {
         let data = map_from(&[
             ("title", Value::String("Hi".into())),
             ("template", Value::String("base.html".into())),
         ]);
-        let d = Doc::new(PathBuf::from("post.md"), String::new(), data);
+        let d = uplifted("post.md", "", data, &tax());
         assert_eq!(d.title, "Hi");
         assert_eq!(d.template.as_deref(), Some("base.html"));
     }
 
     #[test]
-    fn new_uplifts_tags_as_string_sequence() {
+    fn uplift_frontmatter_tags_as_string_sequence() {
         let data = map_from(&[(
             "tags",
             Value::Sequence(vec![
@@ -305,24 +344,39 @@ mod tests {
                 Value::Number(serde_yaml_ng::Number::from(7)),
             ]),
         )]);
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), data);
+        let d = uplifted("p.md", "", data, &tax());
         // Keyed by slug → display text; non-string entries (the `7`) are skipped.
-        assert_eq!(d.tags.len(), 2);
-        assert_eq!(d.tags["rust"], "rust");
-        assert_eq!(d.tags["ssg"], "ssg");
+        let tags = &d.terms["tags"];
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags["rust"], "rust");
+        assert_eq!(tags["ssg"], "ssg");
     }
 
     #[test]
-    fn new_defaults_when_keys_missing() {
-        let d = Doc::new(PathBuf::from("p.md"), String::new(), Mapping::new());
+    fn uplift_frontmatter_custom_taxonomy_field() {
+        let data = map_from(&[(
+            "categories",
+            Value::Sequence(vec![Value::String("Tech".into())]),
+        )]);
+        let taxonomies = vec!["tags".to_string(), "categories".to_string()];
+        let d = uplifted("p.md", "", data, &taxonomies);
+        assert_eq!(d.terms["categories"]["tech"], "Tech");
+        // `tags` bucket exists but is empty.
+        assert!(d.terms["tags"].is_empty());
+    }
+
+    #[test]
+    fn uplift_frontmatter_defaults_when_keys_missing() {
+        let d = uplifted("p.md", "", Mapping::new(), &tax());
         assert_eq!(d.title, "");
-        assert!(d.tags.is_empty());
+        // A bucket is created per taxonomy even with no terms.
+        assert!(d.terms["tags"].is_empty());
         assert!(d.template.is_none());
         assert_eq!(d.date, DateTime::<Utc>::UNIX_EPOCH);
     }
 
     #[test]
-    fn new_preserves_uplifted_keys_in_data() {
+    fn new_preserves_keys_in_data() {
         let data = map_from(&[("title", Value::String("Hi".into()))]);
         let d = Doc::new(PathBuf::from("p.md"), String::new(), data);
         assert_eq!(d.data.get("title").and_then(Value::as_str), Some("Hi"));
@@ -375,7 +429,7 @@ mod tests {
         let mut f = fs::File::create(&path).unwrap();
         writeln!(f, "---\ndate: 2025-10-31\n---\nbody").unwrap();
         drop(f);
-        let d = Doc::load(&dir, Path::new("post.md"), &Defaults::default()).unwrap();
+        let d = Doc::load(&dir, Path::new("post.md"), &tax()).unwrap();
         assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -399,10 +453,11 @@ mod tests {
     #[test]
     fn parse_yaml_extracts_content_and_uplifts() {
         let source = "title: Hi\ntags: [a, b]\ndate: 2025-10-31\ncontent: \"<p>body</p>\"\n";
-        let d = Doc::parse_yaml(PathBuf::from("p.yaml"), source).unwrap();
+        let mut d = Doc::parse_yaml(PathBuf::from("p.yaml"), source).unwrap();
+        d.uplift_frontmatter(&tax());
         assert_eq!(d.title, "Hi");
-        assert_eq!(d.tags["a"], "a");
-        assert_eq!(d.tags["b"], "b");
+        assert_eq!(d.terms["tags"]["a"], "a");
+        assert_eq!(d.terms["tags"]["b"], "b");
         assert_eq!(d.date.to_rfc3339(), "2025-10-31T00:00:00+00:00");
         assert_eq!(d.content, "<p>body</p>");
     }
@@ -435,7 +490,7 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("doc.yaml");
         fs::write(&path, "title: From YAML\ncontent: \"<p>hi</p>\"\n").unwrap();
-        let d = Doc::load(&dir, Path::new("doc.yaml"), &Defaults::default()).unwrap();
+        let d = Doc::load(&dir, Path::new("doc.yaml"), &tax()).unwrap();
         assert_eq!(d.title, "From YAML");
         assert_eq!(d.content, "<p>hi</p>");
         let _ = fs::remove_dir_all(&dir);
@@ -446,7 +501,7 @@ mod tests {
         let dir = tempdir();
         let path = dir.join("post.md");
         fs::write(&path, "# Hello\n").unwrap();
-        let d = Doc::load(&dir, Path::new("post.md"), &Defaults::default()).unwrap();
+        let d = Doc::load(&dir, Path::new("post.md"), &tax()).unwrap();
         // No frontmatter date — should pick up something more recent than the epoch
         // from the just-created file's metadata.
         assert!(d.date > DateTime::<Utc>::UNIX_EPOCH);
@@ -454,42 +509,35 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    fn defaults(s: &str) -> Defaults {
-        Defaults::from_yaml_mapping(&serde_yaml_ng::from_str(s).unwrap()).unwrap()
+    fn mapping(s: &str) -> Mapping {
+        serde_yaml_ng::from_str(s).unwrap()
     }
 
     #[test]
-    fn load_applies_default_permalink_when_absent() {
-        let dir = tempdir();
-        fs::create_dir_all(dir.join("posts")).unwrap();
-        fs::write(dir.join("posts/hello.md"), "---\ndate: 2025-03-07\n---\nbody").unwrap();
-        let d = Doc::load(
-            &dir,
-            Path::new("posts/hello.md"),
-            &defaults("\"posts/*.md\":\n  permalink: \":yyyy/:mm/:dd/:slug/\"\n"),
-        )
-        .unwrap();
+    fn apply_defaults_fills_missing_and_recomputes_output_path() {
+        // Mirror the pipeline: load (new + uplift), then defaults (apply + re-uplift).
+        let mut d = uplifted("posts/hello.md", "", mapping("date: 2025-03-07\n"), &tax());
+        d.apply_defaults(&mapping("permalink: \":yyyy/:mm/:dd/:slug/\"\n"));
+        d.uplift_frontmatter(&tax());
         assert_eq!(d.output_path, PathBuf::from("2025/03/07/hello/index.html"));
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_frontmatter_permalink_wins_over_default() {
-        let dir = tempdir();
-        fs::create_dir_all(dir.join("posts")).unwrap();
-        fs::write(
-            dir.join("posts/hello.md"),
-            "---\npermalink: /custom/\n---\nbody",
-        )
-        .unwrap();
-        let d = Doc::load(
-            &dir,
-            Path::new("posts/hello.md"),
-            &defaults("\"posts/*.md\":\n  permalink: \":slug\"\n"),
-        )
-        .unwrap();
+    fn apply_defaults_own_frontmatter_wins() {
+        let mut d = uplifted("posts/hello.md", "", mapping("permalink: /custom/\n"), &tax());
+        d.apply_defaults(&mapping("permalink: \":slug/\"\n"));
+        d.uplift_frontmatter(&tax());
         assert_eq!(d.output_path, PathBuf::from("custom/index.html"));
-        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_defaults_picks_up_template_and_taxonomy_field() {
+        let taxonomies = vec!["tags".to_string(), "categories".to_string()];
+        let mut d = uplifted("posts/hello.md", "", Mapping::new(), &taxonomies);
+        d.apply_defaults(&mapping("template: post.html\ncategories: [Tech]\n"));
+        d.uplift_frontmatter(&taxonomies);
+        assert_eq!(d.template.as_deref(), Some("post.html"));
+        assert_eq!(d.terms["categories"]["tech"], "Tech");
     }
 
     fn tempdir() -> PathBuf {

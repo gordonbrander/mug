@@ -8,11 +8,11 @@ pub fn default_for(id_path: &Path) -> PathBuf {
 }
 
 /// Expand a `permalink:` pattern (spec §5.1) into a path relative to the
-/// output dir. Supported variables: `:slug`, `:yyyy`, `:mm`, `:dd`, `:page`.
+/// output dir. Supported variables: `:slug`, `:yyyy`, `:mm`, `:dd`, `:term`.
 /// A leading `/` is stripped; a trailing `/` means "write `index.html` here".
-/// `page` is `Some(n)` for generator-emitted pages and `None` for authored
-/// docs — when `None`, a literal `:page` in the pattern is left untouched.
-pub fn expand(pattern: &str, id_path: &Path, date: &DateTime<Utc>, page: Option<usize>) -> PathBuf {
+/// `term` is `Some(slug)` for taxonomy archive pages and `None` otherwise —
+/// when `None`, a literal `:term` in the pattern is left untouched.
+pub fn expand(pattern: &str, id_path: &Path, date: &DateTime<Utc>, term: Option<&str>) -> PathBuf {
     let stem = id_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -25,14 +25,28 @@ pub fn expand(pattern: &str, id_path: &Path, date: &DateTime<Utc>, page: Option<
         .replace(":yyyy", &format!("{:04}", date.year()))
         .replace(":mm", &format!("{:02}", date.month()))
         .replace(":dd", &format!("{:02}", date.day()));
-    if let Some(n) = page {
-        expanded = expanded.replace(":page", &n.to_string());
+    if let Some(term) = term {
+        expanded = expanded.replace(":term", term);
     }
     let mut path = PathBuf::from(&expanded);
     if trailing_slash {
         path.push("index.html");
     }
     path
+}
+
+/// Apply the pagination convention to a landing `permalink` pattern: page 1 is
+/// the landing pattern unchanged; pages ≥2 get a `page/N/` segment appended
+/// (Hugo-style — `/blog/` → `/blog/page/2/`). The result still contains any
+/// `:term`/`:slug` tokens and is meant to be passed to [`expand`]. This is what
+/// keeps paginated pages 2+ off the page-1 landing URL (and out of sitemaps,
+/// since only landing pages are linked/classified).
+pub fn paginate_pattern(permalink: &str, page: usize) -> String {
+    if page <= 1 {
+        permalink.to_string()
+    } else {
+        format!("{}/page/{}/", permalink.trim_end_matches('/'), page)
+    }
 }
 
 /// Convert a filesystem `output_path` into a web URL. Used for `href`
@@ -116,15 +130,26 @@ mod tests {
     }
 
     #[test]
-    fn expand_substitutes_page() {
-        let p = expand("/blog/page-:page/", Path::new("blog.html"), &date(1970, 1, 1), Some(3));
-        assert_eq!(p, PathBuf::from("blog/page-3/index.html"));
+    fn expand_substitutes_term() {
+        let p = expand("/tags/:term/", Path::new("tags.html"), &date(1970, 1, 1), Some("rust"));
+        assert_eq!(p, PathBuf::from("tags/rust/index.html"));
     }
 
     #[test]
-    fn expand_leaves_page_literal_when_none() {
-        let p = expand("/blog/page-:page/", Path::new("blog.html"), &date(1970, 1, 1), None);
-        assert_eq!(p, PathBuf::from("blog/page-:page/index.html"));
+    fn expand_leaves_term_literal_when_none() {
+        let p = expand("/tags/:term/", Path::new("tags.html"), &date(1970, 1, 1), None);
+        assert_eq!(p, PathBuf::from("tags/:term/index.html"));
+    }
+
+    #[test]
+    fn paginate_pattern_page_one_is_verbatim() {
+        assert_eq!(paginate_pattern("/blog/", 1), "/blog/");
+    }
+
+    #[test]
+    fn paginate_pattern_appends_page_segment() {
+        assert_eq!(paginate_pattern("/blog/", 2), "/blog/page/2/");
+        assert_eq!(paginate_pattern("/tags/:term/", 3), "/tags/:term/page/3/");
     }
 
     #[test]

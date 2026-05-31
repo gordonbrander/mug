@@ -1,0 +1,3 @@
+collections:
+  posts:
+    path: "posts/*.md"

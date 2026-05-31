@@ -1,0 +1,2 @@
+{% for item in collection(name="posts") %}{{ item.output_path }}
+{% endfor %}
