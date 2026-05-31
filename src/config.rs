@@ -43,11 +43,12 @@ pub struct Config {
     /// `config.yaml` order; collection lookup is by name regardless.
     #[serde(skip)]
     pub collections: Vec<(String, Query)>,
-    /// Declared taxonomies (named classifications). Always includes the built-in
-    /// `tags` taxonomy unless the user opts out with `taxonomies: { tags: false
-    /// }`. Parsed from the `taxonomies:` key. The read phase uses each
-    /// taxonomy's `field` to uplift a doc's term memberships into `Doc.terms`,
-    /// and the classify phase inverts those into `taxonomy → term → docs`.
+    /// Declared taxonomies (named classifications), parsed from the `taxonomies:`
+    /// key in declaration order. There are no built-in defaults — a site (or the
+    /// scaffold) declares `tags` like any other taxonomy. The read phase uses
+    /// each taxonomy's `field` to uplift a doc's term memberships into
+    /// `Doc.terms`, and the classify phase inverts those into
+    /// `taxonomy → term → docs`.
     #[serde(skip)]
     pub taxonomies: Vec<Taxonomy>,
 }
@@ -66,7 +67,7 @@ impl Default for Config {
             base_path: String::new(),
             defaults: Vec::new(),
             collections: Vec::new(),
-            taxonomies: vec![Taxonomy::new(taxonomy::BUILTIN)],
+            taxonomies: Vec::new(),
         }
     }
 }
@@ -118,8 +119,7 @@ impl Config {
             config.defaults = parse_defaults(&map, &config.collections)
                 .with_context(|| format!("parsing `defaults` in {}", path.display()))?;
         }
-        // Always parse (even when absent) so the built-in `tags` taxonomy is
-        // present unless the user explicitly opts out.
+        // Parse the declared taxonomies (an absent block yields none).
         config.taxonomies = taxonomy::parse(taxonomies_map.as_ref())
             .with_context(|| format!("parsing `taxonomies` in {}", path.display()))?;
         config.site_url = site
@@ -357,19 +357,18 @@ mod tests {
     }
 
     #[test]
-    fn taxonomies_absent_yields_builtin_tags() {
+    fn taxonomies_absent_yields_empty() {
         let dir = tempdir();
         let path = write_config(&dir, "content_dir: foo\n");
         let (config, _) = Config::load(&path).unwrap();
-        let names: Vec<&str> = config.taxonomies.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["tags"]);
+        assert!(config.taxonomies.is_empty());
         cleanup(&dir);
     }
 
     #[test]
-    fn taxonomies_block_merges_with_builtin_tags() {
+    fn taxonomies_block_parsed_in_declaration_order() {
         let dir = tempdir();
-        let path = write_config(&dir, "taxonomies:\n  categories:\n  series:\n    field: serie\n");
+        let path = write_config(&dir, "taxonomies:\n  tags:\n  categories:\n  series:\n    field: serie\n");
         let (config, _) = Config::load(&path).unwrap();
         let names: Vec<&str> = config.taxonomies.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["tags", "categories", "series"]);
@@ -388,11 +387,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_yields_builtin_tags() {
+    fn missing_file_yields_empty_taxonomies() {
         let path = Path::new("/definitely/does/not/exist/config.yaml");
         let (config, _) = Config::load(path).unwrap();
-        let names: Vec<&str> = config.taxonomies.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["tags"]);
+        assert!(config.taxonomies.is_empty());
     }
 
     #[test]

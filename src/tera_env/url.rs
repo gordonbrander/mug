@@ -8,6 +8,10 @@
 //! - `relative_url` — arbitrary relative path → `base_path + "/" + path`.
 //! - `absolute_url` — arbitrary relative path → `site_url + base_path + "/" + path`.
 //!   Falls back to root-relative when `site_url` is `None`.
+//!
+//! All four are registered as *safe* filters (`is_safe() == true`): they emit
+//! URLs, not arbitrary text, so their output must not be HTML-escaped by Tera's
+//! autoescape in `.html`/`.xml` templates (otherwise `/` becomes `&#x2F;`).
 
 use crate::doc::DocMeta;
 use crate::doc_index::DocIndex;
@@ -15,7 +19,7 @@ use crate::permalink;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tera::{Tera, Value};
+use tera::{Filter, Tera, Value};
 
 /// Resolves a doc `id_path` to its URL (`permalink::to_url(output_path)`), or
 /// `None` if no such doc exists. Lets `permalink`/`link` share one filter body
@@ -38,71 +42,121 @@ pub fn lookup_from_index(index: Arc<DocIndex>) -> DocUrlLookup {
     Arc::new(move |id_path: &str| index.output_path(Path::new(id_path)).map(permalink::to_url))
 }
 
+/// `permalink`: doc `id_path` → absolute URL (`site_url + base_path + doc_url`).
+struct PermalinkFilter {
+    lookup: DocUrlLookup,
+    site_url: Option<String>,
+    base_path: String,
+}
+
+impl Filter for PermalinkFilter {
+    fn filter(&self, value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
+        let url = lookup_doc_url(&self.lookup, value, "permalink")?;
+        let out = format!("{}{}{}", self.site_url.as_deref().unwrap_or(""), self.base_path, url);
+        Ok(Value::String(out))
+    }
+
+    fn is_safe(&self) -> bool {
+        true
+    }
+}
+
+/// `link`: doc `id_path` → root-relative URL (`base_path + doc_url`).
+struct LinkFilter {
+    lookup: DocUrlLookup,
+    base_path: String,
+}
+
+impl Filter for LinkFilter {
+    fn filter(&self, value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
+        let url = lookup_doc_url(&self.lookup, value, "link")?;
+        let out = format!("{}{}", self.base_path, url);
+        Ok(Value::String(out))
+    }
+
+    fn is_safe(&self) -> bool {
+        true
+    }
+}
+
+/// `relative_url`: arbitrary path → `base_path + "/" + path`.
+struct RelativeUrlFilter {
+    base_path: String,
+}
+
+impl Filter for RelativeUrlFilter {
+    fn filter(&self, value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
+        let p = value
+            .as_str()
+            .ok_or_else(|| tera::Error::msg("relative_url filter: input must be a string"))?;
+        let stripped = p.trim_start_matches('/');
+        let out = format!("{}/{}", self.base_path, stripped);
+        Ok(Value::String(out))
+    }
+
+    fn is_safe(&self) -> bool {
+        true
+    }
+}
+
+/// `absolute_url`: arbitrary path → `site_url + base_path + "/" + path`.
+struct AbsoluteUrlFilter {
+    site_url: Option<String>,
+    base_path: String,
+}
+
+impl Filter for AbsoluteUrlFilter {
+    fn filter(&self, value: &Value, _args: &HashMap<String, Value>) -> tera::Result<Value> {
+        let p = value
+            .as_str()
+            .ok_or_else(|| tera::Error::msg("absolute_url filter: input must be a string"))?;
+        let stripped = p.trim_start_matches('/');
+        let out = format!(
+            "{}{}/{}",
+            self.site_url.as_deref().unwrap_or(""),
+            self.base_path,
+            stripped
+        );
+        Ok(Value::String(out))
+    }
+
+    fn is_safe(&self) -> bool {
+        true
+    }
+}
+
 pub fn register(
     env: &mut Tera,
     lookup: DocUrlLookup,
     site_url: Option<String>,
     base_path: String,
 ) {
-    // permalink: id_path -> absolute (site_url + base_path + url)
-    let lookup_p = lookup.clone();
-    let site_p = site_url.clone();
-    let base_p = base_path.clone();
     env.register_filter(
         "permalink",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let url = lookup_doc_url(&lookup_p, value, "permalink")?;
-            let out = format!(
-                "{}{}{}",
-                site_p.as_deref().unwrap_or(""),
-                base_p,
-                url
-            );
-            tera::to_value(out).map_err(tera::Error::from)
+        PermalinkFilter {
+            lookup: lookup.clone(),
+            site_url: site_url.clone(),
+            base_path: base_path.clone(),
         },
     );
-
-    // link: id_path -> root-relative (base_path + url)
-    let lookup_l = lookup;
-    let base_l = base_path.clone();
     env.register_filter(
         "link",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let url = lookup_doc_url(&lookup_l, value, "link")?;
-            let out = format!("{}{}", base_l, url);
-            tera::to_value(out).map_err(tera::Error::from)
+        LinkFilter {
+            lookup,
+            base_path: base_path.clone(),
         },
     );
-
-    // relative_url: path -> base_path + "/" + path
-    let base_r = base_path.clone();
     env.register_filter(
         "relative_url",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let p = value.as_str().ok_or_else(|| {
-                tera::Error::msg("relative_url filter: input must be a string")
-            })?;
-            let stripped = p.trim_start_matches('/');
-            let out = format!("{}/{}", base_r, stripped);
-            tera::to_value(out).map_err(tera::Error::from)
+        RelativeUrlFilter {
+            base_path: base_path.clone(),
         },
     );
-
-    // absolute_url: path -> site_url + base_path + "/" + path
     env.register_filter(
         "absolute_url",
-        move |value: &Value, _args: &HashMap<String, Value>| -> tera::Result<Value> {
-            let p = value.as_str().ok_or_else(|| {
-                tera::Error::msg("absolute_url filter: input must be a string")
-            })?;
-            let stripped = p.trim_start_matches('/');
-            let out = format!(
-                "{}{}/{}",
-                site_url.as_deref().unwrap_or(""),
-                base_path,
-                stripped
-            );
-            tera::to_value(out).map_err(tera::Error::from)
+        AbsoluteUrlFilter {
+            site_url,
+            base_path,
         },
     );
 }

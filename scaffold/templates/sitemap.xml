@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-<url><loc>{{ '/' | absolute_url }}</loc></url>
-{%- for item in collection(name="posts") %}
+{%- for item in collection(name="all") %}
 <url><loc>{{ item.id_path | permalink }}</loc></url>
 {%- endfor %}
 </urlset>

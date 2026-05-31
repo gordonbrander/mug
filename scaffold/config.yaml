@@ -19,18 +19,19 @@ collections:
     order_by: date
     sort: desc
     limit: 20
+  # No `path` matches every document. Used by sitemap.xml.
+  all: {}
 
 # Default frontmatter applied to a collection's members. Values fill keys a
 # document didn't set itself (its own frontmatter always wins). Keyed by
 # collection name; when several entries cover a doc, the later one wins.
-# defaults:
-#   posts:
-#     permalink: ":yyyy/:mm/:dd/:slug/"
-#     template: post.html
+defaults:
+  posts:
+    permalink: ":yyyy/:mm/:dd/:slug/"
+    template: post.html
 
-# Taxonomies: named classifications. The built-in `tags` taxonomy is always
-# present (opt out with `tags: false`). Read a taxonomy in templates with
+# Taxonomies: named classifications. Read a taxonomy in templates with
 # `{% for term, docs in taxonomy(name="tags") %}`, and generate per-term archive
-# pages with a `kind: taxonomy` file in `archives/`.
-# taxonomies:
-#   categories:
+# pages with a `kind: taxonomy` file in `archives/` (see archives/tags.html).
+taxonomies:
+  tags:

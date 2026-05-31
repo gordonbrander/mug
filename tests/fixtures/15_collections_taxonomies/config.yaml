@@ -3,3 +3,5 @@ collections:
     path: "posts/*.md"
     order_by: title
     sort: asc
+taxonomies:
+  tags:

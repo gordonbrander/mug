@@ -1,15 +1,18 @@
 //! Taxonomies: named classifications of docs (Hugo's model — a taxonomy has
-//! terms, each term groups docs). `tags` is a built-in default taxonomy that is
-//! always present unless the user opts out with `tags: false`. Users declare
-//! more under the `taxonomies:` key in `config.yaml`. Each doc carries its term
-//! memberships in `Doc.terms` (taxonomy name → slug → display text); the index
-//! inverts those into `taxonomy → term → docs` for the `taxonomy()` template
-//! function and the taxonomy archives.
+//! terms, each term groups docs). Taxonomies are declared under the
+//! `taxonomies:` key in `config.yaml`; there are no built-in defaults (the
+//! scaffolded `config.yaml` declares `tags` like any other). Each doc carries
+//! its term memberships in `Doc.terms` (taxonomy name → slug → display text);
+//! the index inverts those into `taxonomy → term → docs` for the `taxonomy()`
+//! template function and the taxonomy archives.
 
 use anyhow::{Result, anyhow};
 use serde_yaml_ng::{Mapping, Value};
 
-/// The built-in taxonomy, always present unless `taxonomies: { tags: false }`.
+/// The taxonomy name that inline `#hashtags` are bucketed under during the
+/// markup phase (see `build::markup`). It is not auto-registered as a taxonomy —
+/// hashtags only become browsable when the user declares `tags` under
+/// `taxonomies:` in `config.yaml`.
 pub const BUILTIN: &str = "tags";
 
 /// A single taxonomy. `field` is the frontmatter key a doc uses to declare its
@@ -30,15 +33,15 @@ impl Taxonomy {
     }
 }
 
-/// Parse the `taxonomies:` mapping, always starting from the built-in `tags`.
+/// Parse the `taxonomies:` mapping into the declared taxonomies, in declaration
+/// order.
 ///
 /// Each entry is `name: <options>` where options is a mapping (currently only
-/// `field:`), `null` (empty — field defaults to name), or `false` to remove a
-/// taxonomy (the documented way to drop built-in `tags`). The built-in comes
-/// first; user taxonomies follow in declaration order. `None` (no
-/// `taxonomies:` key) yields just `[tags]`.
+/// `field:`), `null`/`true` (field defaults to name), or `false` to remove a
+/// previously-declared taxonomy of that name. `None` (no `taxonomies:` key)
+/// yields an empty list — there are no built-in taxonomies.
 pub fn parse(map: Option<&Mapping>) -> Result<Vec<Taxonomy>> {
-    let mut taxonomies = vec![Taxonomy::new(BUILTIN)];
+    let mut taxonomies: Vec<Taxonomy> = Vec::new();
     let Some(map) = map else {
         return Ok(taxonomies);
     };
@@ -93,17 +96,16 @@ mod tests {
     }
 
     #[test]
-    fn none_yields_builtin_tags() {
+    fn none_yields_empty() {
         let t = parse(None).unwrap();
-        assert_eq!(names(&t), vec!["tags"]);
-        assert_eq!(t[0].field, "tags");
+        assert!(t.is_empty());
     }
 
     #[test]
-    fn builtin_tags_merged_with_user_taxonomies() {
-        let m = yaml("categories:\nseries:\n");
+    fn parses_in_declaration_order() {
+        let m = yaml("tags:\ncategories:\nseries:\n");
         let t = parse(Some(&m)).unwrap();
-        // tags first (built-in), then declaration order.
+        // No built-in: order is exactly the declaration order.
         assert_eq!(names(&t), vec!["tags", "categories", "series"]);
     }
 
@@ -111,20 +113,21 @@ mod tests {
     fn field_defaults_to_name() {
         let m = yaml("categories:\n");
         let t = parse(Some(&m)).unwrap();
-        assert_eq!(t[1].name, "categories");
-        assert_eq!(t[1].field, "categories");
+        assert_eq!(t[0].name, "categories");
+        assert_eq!(t[0].field, "categories");
     }
 
     #[test]
     fn field_can_be_overridden() {
         let m = yaml("series:\n  field: serie\n");
         let t = parse(Some(&m)).unwrap();
-        assert_eq!(t[1].name, "series");
-        assert_eq!(t[1].field, "serie");
+        assert_eq!(t[0].name, "series");
+        assert_eq!(t[0].field, "serie");
     }
 
     #[test]
-    fn tags_false_opts_out() {
+    fn false_removes_a_declared_taxonomy() {
+        // `false` removes an earlier declaration; a lone `false` is a no-op.
         let m = yaml("tags: false\ncategories:\n");
         let t = parse(Some(&m)).unwrap();
         assert_eq!(names(&t), vec!["categories"]);

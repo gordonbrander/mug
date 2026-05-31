@@ -16,6 +16,22 @@ const SCAFFOLD_FILES: &[(&str, &str)] = &[
         include_str!("../../scaffold/templates/base.html"),
     ),
     (
+        "templates/home.html",
+        include_str!("../../scaffold/templates/home.html"),
+    ),
+    (
+        "templates/post.html",
+        include_str!("../../scaffold/templates/post.html"),
+    ),
+    (
+        "templates/archive.html",
+        include_str!("../../scaffold/templates/archive.html"),
+    ),
+    (
+        "templates/tag.html",
+        include_str!("../../scaffold/templates/tag.html"),
+    ),
+    (
         "templates/sitemap.xml",
         include_str!("../../scaffold/templates/sitemap.xml"),
     ),
@@ -26,6 +42,14 @@ const SCAFFOLD_FILES: &[(&str, &str)] = &[
     (
         "archives/rss.xml",
         include_str!("../../scaffold/archives/rss.xml"),
+    ),
+    (
+        "archives/posts.html",
+        include_str!("../../scaffold/archives/posts.html"),
+    ),
+    (
+        "archives/tags.html",
+        include_str!("../../scaffold/archives/tags.html"),
     ),
     ("static/.gitkeep", include_str!("../../scaffold/static/.gitkeep")),
 ];

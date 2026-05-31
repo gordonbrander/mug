@@ -1,5 +1,5 @@
 ---
 title: Home
-template: base.html
+template: home.html
 ---
 Welcome to {{ site.title }}.
