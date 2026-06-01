@@ -384,6 +384,30 @@ appending `…` when it cuts. Default `length` is 250. Unlike Tera's built-in
 
 Available in: template phase, content phase.
 
+### `markdown` — render Markdown to HTML
+
+Render a string of Markdown to HTML. Use the block form to render a whole
+region, or the pipe form to render a value:
+
+```jinja
+{% filter markdown %}
+# Hello
+
+Some *Markdown*, a [link](https://example.com), and a `code` span.
+{% endfilter %}
+```
+
+```jinja
+{{ page.data.blurb | markdown }}
+```
+
+Uses the same renderer as Markdown bodies (GitHub-flavored Markdown plus
+syntax-highlighted code fences), and its output is marked safe, so it is not
+re-escaped in `.html`/`.xml` templates. Wikilinks and `#hashtags` are not
+rendered in this filter (since the page index is unavailable during the content phase).
+
+Available in: template phase, content phase.
+
 ### URL filters
 
 | Filter         | Input         | Output                                |

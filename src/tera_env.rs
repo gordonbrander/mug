@@ -13,6 +13,7 @@ mod collection;
 mod doc;
 mod entries;
 mod macros;
+mod markdown;
 mod taxonomy;
 mod text;
 mod url;
@@ -80,6 +81,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     let mut tera = load_templates(config)?;
     // Build the stem index before `docs` is moved into the URL filters.
     let stem_index = build_stem_index(&docs);
+    let options = markup_options();
     url::register(
         &mut tera,
         url::lookup_from_metas(docs),
@@ -88,11 +90,12 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     );
     text::register(&mut tera);
     entries::register(&mut tera);
+    markdown::register(&mut tera, options.clone(), SYNTECT.clone());
     let macro_preamble = macros::discover_imports(config);
     Ok(MarkupEnv {
         tera,
         macro_preamble,
-        options: markup_options(),
+        options,
         syntect: SYNTECT.clone(),
         stem_index,
         hashtags: config.hashtags,
@@ -119,6 +122,7 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
     );
     text::register(&mut env);
     entries::register(&mut env);
+    markdown::register(&mut env, markup_options(), SYNTECT.clone());
     Ok(env)
 }
 
@@ -685,6 +689,54 @@ mod tests {
         let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
         assert!(
             env.render_str("{{ m | entries(sort=\"sideways\") }}", &ctx_with_map())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn markdown_block_filter_on_markup_env() {
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        let out = env
+            .tera
+            .render_str(
+                "{% filter markdown %}# Hi{% endfilter %}",
+                &tera::Context::new(),
+            )
+            .unwrap();
+        assert!(out.contains("<h1>"), "expected an <h1>, got: {out}");
+    }
+
+    #[test]
+    fn markdown_pipe_filter_on_template_env() {
+        let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        let out = env
+            .render_str("{{ \"*hi*\" | markdown }}", &tera::Context::new())
+            .unwrap();
+        assert!(out.contains("<em>hi</em>"), "expected <em>hi</em>, got: {out}");
+    }
+
+    #[test]
+    fn markdown_filter_registered_on_both_envs() {
+        let mut markup = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        assert!(
+            markup
+                .tera
+                .render_str("{{ \"*x*\" | markdown }}", &tera::Context::new())
+                .is_ok()
+        );
+        let mut template = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert!(
+            template
+                .render_str("{{ \"*x*\" | markdown }}", &tera::Context::new())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn markdown_filter_rejects_non_string_input() {
+        let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert!(
+            env.render_str("{{ 5 | markdown }}", &tera::Context::new())
                 .is_err()
         );
     }
