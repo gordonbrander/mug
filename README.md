@@ -1,10 +1,18 @@
 # mug
 
-Mug is a fast, reliable site-generator, written in Rust. Its goals are:
+Mug is a site-generator written in Rust. Its goals are:
 
-- Blog, wiki, and [digital garden](https://maggieappleton.com/garden-history)-aware: supports date-based posts, wikilinks, backlinks, hashtags, and more. Aims to be compatible with [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your digital garden.
-- Reliable: Works out-of-the-box with zero config. No framework churn, no dependencies. Does one thing well.
-- Fast: it's Rust, so...
+- Practical: Works out-of-the-box with zero config. No framework churn, no third-party plugins. One binary with everything you need.
+- Flexible: publish a website, blog, wiki, or [digital garden](https://maggieappleton.com/garden-history).
+- Fast: Embarrasingly parallel rendering with Rust.
+
+## Features
+
+Mug has everything you need for...
+
+- Blogs: publish date-based posts with tags, paginated archives, and rss feeds...
+- [Digital gardens](https://maggieappleton.com/garden-history): Publish your second brain. Aims to be compatible with [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your vault: wikilinks, backlinks, hashtags...
+- Websites: flexible folder layout, custom collections, and multiple taxonomies offer powerful tools for organizing.
 
 ## Install
 
@@ -18,34 +26,34 @@ This puts `mug` on your `PATH` (typically `~/.cargo/bin/mug`).
 
 ## Quick start
 
+`mug new` scaffolds a starter site with a sample page, a sample post, a base
+template, a built-in RSS archive, and a sitemap page.
+
 ```sh
 mug new my-site
 cd my-site
-mug build       # one-shot build into public/
-mug watch       # rebuild on every file change
+mug serve       # Start a dev server, automatically rebuild on change
 ```
-
-`mug new` scaffolds a starter site with a sample page, a sample post, a base
-template, a built-in RSS archive, and a sitemap page.
 
 ## Project layout
 
 ```
-content/        Authored documents (.md, .html, .yaml). Render to their own paths.
-archives/       Templates whose frontmatter declares a kind → fan out into pages.
-templates/      Tera layouts, partials, and macros.
-data/           YAML files mixed into the global data cascade.
-static/         Copied verbatim into the build output.
-config.yaml     Optional. Sensible defaults apply if absent.
+content/        # Your site content (.md, .html, .yaml)
+archives/       # Generated archives (tags, collections, feeds, sitemaps, etc)
+templates/      # Tera layouts, partials, and macros.
+data/           # YAML files mixed into the global data cascade.
+static/         # Copied verbatim
+config.yaml     # Site config
 ```
 
-There is no `posts/` or `pages/` convention baked in — subdirectories under
-`content/` are just path prefixes. A blog is `content/posts/*.md` *by
-convention of the author's queries*, not by any built-in section concept.
+Note that Mug doesn't impose a specific layout on your content folder. You can organize
+it however you you like, and use custom **collections** to define blogs, sections, and
+other concepts. This flexibility lets you support multiple blogs, news feeds, and
+portals in the same site.
 
-## Writing content
+## Authoring content
 
-Three input types are supported:
+Mug supports three kinds of content:
 
 | Type    | Frontmatter        | Body                                            |
 |---------|--------------------|-------------------------------------------------|
@@ -53,7 +61,7 @@ Three input types are supported:
 | `.html` | Optional YAML block | Raw HTML → passed through                        |
 | `.yaml` | The whole file      | `content:` field rendered as HTML                |
 
-Markdown and HTML carry frontmatter as a leading `---`-delimited YAML block:
+Markdown and both HTML allow you to add frontmatter for structured data:
 
 ```markdown
 ---
@@ -65,13 +73,14 @@ tags: [intro]
 The body of the post goes here.
 ```
 
-Recognized frontmatter keys (all optional):
+A few frontmatter keys have special meaning, and are given sensible defaults
+if absent:
 
 | Key         | Default                                  |
 |-------------|------------------------------------------|
 | `title`     | `""`                                     |
 | `template`  | `None` (body is the final output)        |
-| `tags`      | `[]` (and any other taxonomy field — see [Taxonomies](#taxonomies)) |
+| `tags`      | `[]` (and other taxonomy fields—see [taxonomies](#taxonomies)) |
 | `date`      | file created time, then file modified time |
 | `updated`   | file modified time                       |
 | `permalink` | mirror of source path (see below)        |
@@ -79,6 +88,18 @@ Recognized frontmatter keys (all optional):
 Any other key is preserved verbatim on `page.data` and reachable from templates
 as `{{ page.data.your_key }}`. A doc's term memberships are available as
 `page.terms` (e.g. `page.terms.tags`), a map of taxonomy → slug → display text.
+
+### Wikilinks
+
+In Markdown, `[[Page Title]]` and `[[Page Title|Display text]]` resolve to
+pages by slugified stem. The resolver uses the same algorithm as Obsidian,
+searching the current directory first, expanding the search until it finds the
+closest match.
+
+Resolved links render as `<a class="wikilink" href="…">…</a>`; unresolved
+links render as `<span class="nolink">…</span>`.
+
+Every resolved wikilink also registers an edge in the page's backlink graph.
 
 ## Site config (`config.yaml`)
 
@@ -99,30 +120,36 @@ site:
   url: https://example.com   # origin for absolute URLs; no trailing slash
   base_path: ""              # subpath the site is hosted under, e.g. "/blog"
 
-# Add default frontmatter to matching pages
-# Defaults can be overridden on a per-page basis
-defaults:
-  "posts/*.md":
-    permalink: /blog/:yyyy/:mm/:dd/:slug/
-    template: post.html
-
-# Named collections: saved queries, read in templates with collection(name=...)
+# Collections are saved queries.
+# You can access them in templates with collection(name=...)
 collections:
   posts:
     path: "posts/*.md"
     order_by: date
     sort: desc
 
-# Taxonomies: named classifications. Built-in `tags` is always present.
+# Taxonomies are custom tag and category types.
+# Defined by listing the frontmatter fields you want to be treated as taxonomies.
 taxonomies:
-  categories:
+  - tags
+  - category
+
+# Add default frontmatter to collections
+# Defaults can be overridden on a per-page basis
+defaults:
+  posts:
+    permalink: /blog/:yyyy/:mm/:dd/:slug/
+    template: post.html
+
+# Extract inline `#hashtags` from Markdown bodies into the `tags` taxonomy.
+hashtags: true
 ```
 
 ## Permalinks
 
 By default a document renders to a location mirroring its source path. You can
 override this by setting a `permalink` frontmatter key
-(or by setting permalink defaults in your `config.yaml`).
+(or by setting a permalink default in your `config.yaml`).
 
 ```yaml
 permalink: /blog/:yyyy/:slug/   # → /blog/2026/hello/index.html
@@ -138,20 +165,40 @@ Available permalink variables:
 - `:dd`: two-digit day
 - `:term` — term slug (taxonomy archives only)
 
-Paginated archives append `page/N/` to the landing permalink for pages 2 and up
-(e.g. `/blog/` → `/blog/page/2/`); there is no `:page` variable.
+## Collections
 
-## Defaults
-
-Rather than repeat the same frontmatter in every file, declare defaults for a
-**collection** in `config.yaml` under a `defaults:` key. Each entry names a
-collection (from `collections:`); its values fill keys the collection's members
-didn't set themselves:
+Collections are defined in `config.yaml` and let you create custom groups and sections
+for your site. For example, you can define a blog like this:
 
 ```yaml
 collections:
   posts:
     path: "posts/*.md"
+    order_by: date
+    sort: desc
+```
+
+This gives you a reverse-chronological collection of posts that can be accessed
+in templates and used to generate archives. You can define as many collections as you want.
+
+Collection queries can specify:
+
+- `path`: A glob pattern for matching files in `content/`.
+- `order_by`: The field to sort by. Can be `title`, `date`, or `updated`. Default: `date`.
+- `sort`: The direction of the sort. Can be `asc` or `desc`. Default: `desc`.
+- `limit`: Max number of items in this collection. Defaults to "unlimited".
+- `omit`: a list of documents to exclude (by `id_path`).
+
+## Defaults
+
+Rather than repeating the same frontmatter for every file, you can **set defaults for a
+collection** in `config.yaml`.
+
+```yaml
+collections:
+  posts:
+    path: "posts/*.md"
+
 defaults:
   posts:
     permalink: /blog/:yyyy/:mm/:dd/:slug/
@@ -159,20 +206,34 @@ defaults:
 ```
 
 With the above, every member of the `posts` collection gets a dated permalink and
-the `post.html` layout without restating either in its frontmatter. This is a
-general mechanism — any frontmatter key can be defaulted, not just `permalink`.
+the `post.html` layout without having to write either in its frontmatter. When a document
+belongs to more than one collection, and matches more than one default, the last default
+wins. Of course, the document's own frontmatter always overrides defaults.
 
-Rules:
 
-- **A document's own frontmatter always wins.** Defaults only fill keys the
-  document left unset.
-- **A `defaults:` key must name a declared collection** — an unknown name is a
-  config error.
-- **When several collections cover a doc, the later `defaults:` entry wins.**
+## Taxonomies
 
-Defaults are applied after collection membership is computed and before bodies
-are rendered, so they behave exactly as if written inline — including feeding a
-defaulted taxonomy field (e.g. `tags`) into the taxonomies.
+Taxonomies let you categorize docs. Declare taxonomies as an array of fields
+under `taxonomies:` in `config.yaml`. These fields will be treated as tags by Mug.
+
+```yaml
+# config.yaml
+taxonomies:
+  - tags
+  - category
+  - series
+```
+
+```yaml
+# a document's frontmatter
+category: [rust, tools]
+```
+
+You can define as many taxonomies as you like. This can be a powerful way to organize
+content on complex websites.
+
+When hashtags are turned on (`hashtags: true` in `config.yaml`), Mug will lift inline `#hashtags` into
+the `tags` taxonomy and strip them from the rendered markup.
 
 ## Templates
 
@@ -190,7 +251,7 @@ Inside a template, the available context is:
   `page.content` for the rendered body, plus `page.data` for full frontmatter)
 - `site`: the `site:` submap from `config.yaml`
 - `data`: every top-level YAML file in `data/`, keyed by filename stem
-- `pagination` and `term`: (only on archive-emitted pages—see below)
+- `pagination` and `term`: (only on archive pages—see below)
 
 Example `templates/base.html`:
 
@@ -206,15 +267,20 @@ Example `templates/base.html`:
 
 ## Template filters and functions
 
+Templates get all the [built-in Tera template filters and functions](https://keats.github.io/tera/docs/#built-ins),
+plus a few extra added by mug...
+
 ### `collection(...)` — list a named collection
 
-Lists are defined once in `config.yaml` under `collections:` (a saved query) and
-read in templates by name with `collection(name=...)`:
+Collections are defined in `config.yaml` under `collections:` and
+accessible in templates via `collection(name=...)`.
+
+For example:
 
 ```yaml
 # config.yaml
 collections:
-  posts:
+  recent_posts:
     path: "posts/*.md"
     order_by: date
     sort: desc
@@ -222,15 +288,12 @@ collections:
 ```
 
 ```jinja
-{% for post in collection(name="posts") %}
+{% for post in collection(name="recent_posts") %}
   <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
 {% endfor %}
 ```
 
-A collection's query takes: `path` (glob), `order_by` (`title` | `date` |
-`updated`), `sort` (`asc` | `desc`), `limit` (integer), `omit` (array of
-`id_path` strings to exclude). Default is `order_by=date, sort=desc`. (Filtering
-by tag is served by taxonomies — see below.)
+Available in: template phase.
 
 ### `taxonomy(...)` — list a taxonomy's terms
 
@@ -241,8 +304,7 @@ by tag is served by taxonomies — see below.)
 {% endfor %}
 ```
 
-Both `collection()` and `taxonomy()` classify source content only — pages
-emitted by archives never appear in them.
+Available in: template phase.
 
 ### `backlinks` — pages that link to this one
 
@@ -257,7 +319,41 @@ Kwargs: `order_by` (`title` | `date` | `updated`), `sort` (`asc` | `desc`),
 drop a page's self-link from its own backlinks). Default is
 `order_by=date, sort=desc`.
 
-Available in templates only.
+Available in: template phase.
+
+### `doc(...)` — look up a single doc
+
+Fetch one document by its `id_path`. Returns `null` for an unknown path (so you
+can guard with `{% if %}` rather than failing the build):
+
+```jinja
+{% set about = doc(id_path="about.md") %}
+{% if about %}<a href="{{ about.id_path | link }}">{{ about.title }}</a>{% endif %}
+```
+
+Available in: template phase.
+
+### `dictsort` — iterate a map in key order
+
+Tera's `sort` filter only takes arrays. `map | dictsort` turns a map into an
+array of `{key, value}` objects sorted by key — handy for walking a
+`taxonomy(...)` map deterministically. `sort` is `asc` (default) or `desc`:
+
+```jinja
+{% for entry in taxonomy(name="tags") | dictsort(sort="desc") %}
+  {{ entry.key }}: {{ entry.value | length }}
+{% endfor %}
+```
+
+Available in: template phase, content phase.
+
+### `truncate_words` — word-aware truncation
+
+`text | truncate_words(length=N)` truncates at the last whitespace that fits,
+appending `…` when it cuts. Default `length` is 250. Unlike Tera's built-in
+`truncate`, it never splits a word; pair with `striptags` to summarize HTML.
+
+Available in: template phase, content phase.
 
 ### URL filters
 
@@ -268,18 +364,7 @@ Available in templates only.
 | `relative_url` | any path      | `base_path` + `/` + path              |
 | `absolute_url` | any path      | `site.url` + `base_path` + `/` + path |
 
-All four are available in both document bodies and templates.
-
-## Wikilinks
-
-In Markdown, `[[Page Title]]` and `[[Page Title|Display text]]` resolve to
-pages by slugified stem. The resolver searches the current directory first,
-then walks up toward the project root; the first match wins. Resolved links
-render as `<a class="wikilink" href="…">…</a>`; unresolved links render as
-`<span class="nolink">…</span>` and log a warning.
-
-Every resolved wikilink also registers an edge in the backlink graph, so the
-`backlinks` filter Just Works.
+Available in: template phase, content phase.
 
 ## Macros (shortcodes)
 
@@ -301,34 +386,39 @@ Call it from any Markdown body — it expands *before* Markdown render:
 Macro files are auto-imported (non-recursively) into the markup-phase Tera
 environment. In templates, import them explicitly with `{% import %}`.
 
-## Taxonomies
+## Content templates
 
-A **taxonomy** is a named classification of docs by term. The built-in `tags`
-taxonomy is always present; declare more under `taxonomies:` in `config.yaml`.
-Each doc lists its terms under the taxonomy's frontmatter field (the taxonomy
-name by default):
+Mug runs an initial Tera template render on content **before** rendering markup
+and templates. This is what enables macros, and it also means you can use
+Tera partials and other features in your docs:
 
-```yaml
-# config.yaml
-taxonomies:
-  categories:        # field defaults to the taxonomy name
-  series:
-    field: serie     # override the frontmatter field
+```markdown
+---
+tags: ["movies", "sci-fi", "review"]
+---
+
+This post has tags:
+
+{% for tag of page.tags %}
+  {{ tag }}
+{% endfor %}
 ```
 
-The built-in `tags` is merged in, not replaced — opt out with `tags: false`. A
-doc's memberships live on `page.terms` (e.g. `page.terms.categories`), and
-`taxonomy(name=...)` returns a term-slug → docs map for templates and archives.
+Within the content phase, Tera templates can't access data from other pages,
+only site data and data from the page they render in.
 
 ## Archives
 
-An **archive** is a template in `archives/` that fans a collection or taxonomy
-out into many output pages. Its frontmatter declares a `kind` and names the
-collection/taxonomy; the body renders once per page with a `pagination` context.
-The `permalink` is the page-1 (landing) URL — pages 2+ append `page/N/`
-automatically (e.g. `/blog/` → `/blog/page/2/`).
+An **archive** is a template in `archives/` that genenerates output pages from
+a collection or taxonomy. Archives are used to generate paginated collection
+archives and tag archives, as well as things like RSS feeds and sitemaps.
 
-Paginate a collection into list pages — `archives/blog.html`:
+Archives come in several `kind`s (e.g. "taxonomy" or "collection").
+The body of the archive template renders once per page with a `pagination` context.
+When paginated, `permalink` has page numbers appended automatically
+(e.g. `/blog/` → `/blog/page/2/`).
+
+Example: `archives/blog.html`:
 
 ```yaml
 ---
@@ -336,15 +426,15 @@ kind: collection
 collection: posts
 permalink: /blog/
 per_page: 10
-template: blog-layout.html
+template: blog-archive.html
 ---
 {% for post in pagination.items %}
   <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
 {% endfor %}
 ```
 
-Emit one (optionally paginated) page per taxonomy term — `:term` in the
-`permalink` is the term slug, and the body receives a `term` (`slug`, `text`):
+Example: `tag-archive.html`: Emit one (optionally paginated) page per taxonomy term
+— `:term` in the `permalink` is the term slug, and the body receives a `term` (`slug`, `text`):
 
 ```yaml
 ---
@@ -364,10 +454,7 @@ automatically. Archives read only the classification of source content (never
 each other's output), so they are order-independent and run in parallel — there
 is no execution-order key.
 
-A whole-site listing such as `sitemap.xml` is an ordinary `content/` page that
-iterates a collection, not an archive — it lists canonical pages, not paginated
-archive pages. The scaffold ships a starter RSS archive and a sitemap page that
-work out of the box.
+The scaffold ships a starter RSS archive and a sitemap page that work out of the box.
 
 ## CLI
 
