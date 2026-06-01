@@ -50,12 +50,12 @@ where
     }
     // `templates_dir`/`archives_dir` already point into the theme when one is
     // configured; the theme's `static/` is separate, so watch it too.
-    if let Some(theme_static) = &config.theme_static_dir
+    if let Some(theme_static) = config.theme_static()
         && theme_static.exists()
     {
         debouncer
             .watcher()
-            .watch(theme_static, RecursiveMode::Recursive)?;
+            .watch(&theme_static, RecursiveMode::Recursive)?;
     }
     let config_path = Path::new("config.yaml");
     if config_path.exists() {

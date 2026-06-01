@@ -24,11 +24,6 @@ pub struct Config {
     /// still contributes files via the conventional subdir names. Themes are not
     /// nested: a `theme:` key inside a theme's own `config.yaml` is ignored.
     pub theme: Option<PathBuf>,
-    /// The theme's resolved `static/` root, populated during [`load`] when a
-    /// theme is configured. [`static_roots`](Self::static_roots) yields it before
-    /// `static_dir` so the site overlays the theme during the copy phase.
-    #[serde(skip)]
-    pub theme_static_dir: Option<PathBuf>,
     /// When set, the markup phase scans Markdown bodies for inline `#hashtag`s,
     /// adds them to each doc's `tags`, and strips them from the rendered HTML.
     /// Off by default so literal `#` in prose is untouched. Sourced from the
@@ -77,7 +72,6 @@ impl Default for Config {
             data_dir: PathBuf::from("data"),
             archives_dir: PathBuf::from("archives"),
             theme: None,
-            theme_static_dir: None,
             hashtags: false,
             site_url: None,
             base_path: String::new(),
@@ -188,10 +182,9 @@ impl Config {
         // Templates & archives come from the theme (theme dir only). A theme
         // always uses the conventional `templates/`/`archives/`/`static/` subdir
         // names relative to its root — its own `*_dir` config keys do not apply.
+        // (The `static/` root is derived on demand in `static_roots`.)
         self.templates_dir = theme_dir.join("templates");
         self.archives_dir = theme_dir.join("archives");
-        // Static overlays: theme copied first, site over the top.
-        self.theme_static_dir = Some(theme_dir.join("static"));
         // Collections & defaults: theme entries first, site overrides by name or
         // appends. Taxonomies: theme then site, dedup preserving order.
         self.collections = merge_named(theme.collections, std::mem::take(&mut self.collections));
@@ -221,13 +214,21 @@ impl Config {
             .unwrap_or_default();
     }
 
-    /// Ordered `static/` source roots: the theme's (if a theme is configured)
-    /// followed by the site's. The static-copy phase walks them in order so the
-    /// site overlays the theme. With no theme this is just `static_dir`.
+    /// The theme's `static/` directory, if a theme is configured. Derived from
+    /// `theme` (always the conventional `static/` subdir); the single place that
+    /// knowledge lives.
+    pub fn theme_static(&self) -> Option<PathBuf> {
+        self.theme.as_ref().map(|theme| theme.join("static"))
+    }
+
+    /// Ordered `static/` source roots: the theme's `static/` (if a theme is
+    /// configured) followed by the site's `static_dir`. The static-copy phase
+    /// walks them in order so the site overlays the theme. With no theme this is
+    /// just `static_dir`.
     pub fn static_roots(&self) -> Vec<PathBuf> {
         let mut roots = Vec::new();
-        if let Some(theme_static) = &self.theme_static_dir {
-            roots.push(theme_static.clone());
+        if let Some(theme_static) = self.theme_static() {
+            roots.push(theme_static);
         }
         roots.push(self.static_dir.clone());
         roots
@@ -571,7 +572,7 @@ mod tests {
         let (config, _) = Config::load(&path).unwrap();
         assert_eq!(config.templates_dir, theme.join("templates"));
         assert_eq!(config.archives_dir, theme.join("archives"));
-        assert_eq!(config.theme_static_dir, Some(theme.join("static")));
+        assert_eq!(config.theme_static(), Some(theme.join("static")));
         // content/output/data stay site-only.
         assert_eq!(config.content_dir, PathBuf::from("content"));
         assert_eq!(config.output_dir, PathBuf::from("public"));
@@ -590,7 +591,7 @@ mod tests {
         let (config, _) = Config::load(&path).unwrap();
         assert_eq!(config.templates_dir, theme.join("templates"));
         assert_eq!(config.archives_dir, theme.join("archives"));
-        assert_eq!(config.theme_static_dir, Some(theme.join("static")));
+        assert_eq!(config.theme_static(), Some(theme.join("static")));
         cleanup(&dir);
     }
 
@@ -603,7 +604,7 @@ mod tests {
         let (config, _) = Config::load(&path).unwrap();
         assert_eq!(config.templates_dir, theme.join("templates"));
         assert_eq!(config.archives_dir, theme.join("archives"));
-        assert_eq!(config.theme_static_dir, Some(theme.join("static")));
+        assert_eq!(config.theme_static(), Some(theme.join("static")));
         cleanup(&dir);
     }
 

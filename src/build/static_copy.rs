@@ -74,16 +74,17 @@ mod tests {
     #[test]
     fn site_static_overlays_theme_static() {
         let base = tempdir();
-        let theme_static = base.join("theme/static");
+        let theme = base.join("theme");
         let site_static = base.join("static");
         let out = base.join("public");
-        write(&theme_static.join("shared.css"), "theme");
-        write(&theme_static.join("only-theme.css"), "t");
+        // `static_roots()` derives the theme's `static/` from the theme dir.
+        write(&theme.join("static/shared.css"), "theme");
+        write(&theme.join("static/only-theme.css"), "t");
         write(&site_static.join("shared.css"), "site");
         write(&site_static.join("only-site.css"), "s");
         let config = Config {
             static_dir: site_static,
-            theme_static_dir: Some(theme_static),
+            theme: Some(theme),
             output_dir: out.clone(),
             ..Config::default()
         };
@@ -100,7 +101,7 @@ mod tests {
         let base = tempdir();
         let config = Config {
             static_dir: base.join("nope"),
-            theme_static_dir: Some(base.join("also-nope")),
+            theme: Some(base.join("also-nope")),
             output_dir: base.join("public"),
             ..Config::default()
         };
