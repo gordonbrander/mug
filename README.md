@@ -142,6 +142,9 @@ static_dir: static
 data_dir: data
 archives_dir: archives
 
+# Optional: layer a theme (see "Themes" below). No default.
+# theme: themes/my-theme
+
 site:
   # Anything under `site:` is reachable in templates as `{{ site.x }}`.
   title: My Site
@@ -173,6 +176,47 @@ defaults:
 # Extract inline `#hashtags` from Markdown bodies into the `tags` taxonomy.
 hashtags: true
 ```
+
+## Themes
+
+A **theme** bundles templates, archives, static assets, and config defaults in a
+folder, so a whole look-and-feel can be shared and reused. Point at one with the
+top-level `theme:` key:
+
+```yaml
+# config.yaml
+theme: themes/my-theme
+```
+
+A theme is just a folder laid out like a site — its own optional `config.yaml`
+plus the conventional subdirs:
+
+```
+themes/my-theme/
+  config.yaml     # theme's config defaults (optional)
+  templates/      # Tera layouts, partials, macros
+  archives/       # collection/taxonomy archive pages
+  static/         # static assets
+```
+
+When a theme is set, Mug layers it underneath your site:
+
+- **Templates and archives** come from the theme. Your site's own `templates/`
+  and `archives/` directories are not used — customize the look through config
+  and the static overlay instead. A theme always uses the conventional
+  `templates/`, `archives/`, and `static/` subdir names relative to its root;
+  the `*_dir` keys in a theme's own `config.yaml` do not apply to it.
+- **Config** in the theme's `config.yaml` provides **defaults** your site
+  overrides. `collections` and `defaults` merge by name (your site wins on a
+  name clash, the theme's other entries are kept); `taxonomies` are unioned; the
+  `site:` map is deep-merged with your values winning.
+- **Static** is overlaid: the theme's `static/` is copied first, then your
+  site's `static/` over the top, so your files win on a path collision.
+- **`data/`, `content/`, and the output directory stay yours** — a theme never
+  ships data or content, nor dictates where your content lives or output goes.
+
+A theme without a `config.yaml` still contributes its files. Themes don't nest:
+a `theme:` key inside a theme's own `config.yaml` is ignored.
 
 ## Permalinks
 
