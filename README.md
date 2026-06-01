@@ -333,14 +333,14 @@ can guard with `{% if %}` rather than failing the build):
 
 Available in: template phase.
 
-### `dictsort` — iterate a map in key order
+### `entries` — iterate a map in key order
 
-Tera's `sort` filter only takes arrays. `map | dictsort` turns a map into an
+Tera's `sort` filter only takes arrays. `map | entries` turns a map into an
 array of `{key, value}` objects sorted by key — handy for walking a
 `taxonomy(...)` map deterministically. `sort` is `asc` (default) or `desc`:
 
 ```jinja
-{% for entry in taxonomy(name="tags") | dictsort(sort="desc") %}
+{% for entry in taxonomy(name="tags") | entries(sort="desc") %}
   {{ entry.key }}: {{ entry.value | length }}
 {% endfor %}
 ```

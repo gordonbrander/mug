@@ -10,8 +10,8 @@
 
 mod backlinks;
 mod collection;
-mod dictsort;
 mod doc;
+mod entries;
 mod macros;
 mod taxonomy;
 mod text;
@@ -87,7 +87,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
         config.base_path.clone(),
     );
     text::register(&mut tera);
-    dictsort::register(&mut tera);
+    entries::register(&mut tera);
     let macro_preamble = macros::discover_imports(config);
     Ok(MarkupEnv {
         tera,
@@ -118,7 +118,7 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
         config.base_path.clone(),
     );
     text::register(&mut env);
-    dictsort::register(&mut env);
+    entries::register(&mut env);
     Ok(env)
 }
 
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(out, "hello world…");
     }
 
-    // Tera has no inline map-literal syntax, so dictsort tests seed the map
+    // Tera has no inline map-literal syntax, so entries tests seed the map
     // through the render context.
     fn ctx_with_map() -> tera::Context {
         let mut ctx = tera::Context::new();
@@ -634,11 +634,11 @@ mod tests {
     }
 
     #[test]
-    fn dictsort_sorts_map_by_key_ascending_by_default() {
+    fn entries_sorts_map_by_key_ascending_by_default() {
         let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
         let out = env
             .render_str(
-                "{% for e in m | dictsort %}{{ e.key }}={{ e.value }} {% endfor %}",
+                "{% for e in m | entries %}{{ e.key }}={{ e.value }} {% endfor %}",
                 &ctx_with_map(),
             )
             .unwrap();
@@ -646,11 +646,11 @@ mod tests {
     }
 
     #[test]
-    fn dictsort_desc_reverses_key_order() {
+    fn entries_desc_reverses_key_order() {
         let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
         let out = env
             .render_str(
-                "{% for e in m | dictsort(sort=\"desc\") %}{{ e.key }} {% endfor %}",
+                "{% for e in m | entries(sort=\"desc\") %}{{ e.key }} {% endfor %}",
                 &ctx_with_map(),
             )
             .unwrap();
@@ -658,13 +658,13 @@ mod tests {
     }
 
     #[test]
-    fn dictsort_is_registered_on_markup_env() {
-        // Both envs get `dictsort` — it is pure data shaping, like the text filters.
+    fn entries_is_registered_on_markup_env() {
+        // Both envs get `entries` — it is pure data shaping, like the text filters.
         let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let out = env
             .tera
             .render_str(
-                "{% for e in m | dictsort %}{{ e.key }} {% endfor %}",
+                "{% for e in m | entries %}{{ e.key }} {% endfor %}",
                 &ctx_with_map(),
             )
             .unwrap();
@@ -672,19 +672,19 @@ mod tests {
     }
 
     #[test]
-    fn dictsort_rejects_non_map_input() {
+    fn entries_rejects_non_map_input() {
         let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
         assert!(
-            env.render_str("{{ [1, 2, 3] | dictsort }}", &tera::Context::new())
+            env.render_str("{{ [1, 2, 3] | entries }}", &tera::Context::new())
                 .is_err()
         );
     }
 
     #[test]
-    fn dictsort_rejects_unknown_sort_direction() {
+    fn entries_rejects_unknown_sort_direction() {
         let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
         assert!(
-            env.render_str("{{ m | dictsort(sort=\"sideways\") }}", &ctx_with_map())
+            env.render_str("{{ m | entries(sort=\"sideways\") }}", &ctx_with_map())
                 .is_err()
         );
     }

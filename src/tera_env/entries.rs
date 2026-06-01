@@ -1,12 +1,12 @@
-//! `dictsort` — turn a map into a key-sorted array, registered on both envs.
+//! `entries` — turn a map into a key-sorted array, registered on both envs.
 //!
 //! Tera has no built-in for iterating a map in a defined order (its `sort`
-//! filter only takes arrays). `map | dictsort` emits an array of
+//! filter only takes arrays). `map | entries` emits an array of
 //! `{key, value}` objects sorted by `key`, so templates can walk a
 //! `taxonomy(...)` map or a `group_by` result deterministically:
 //!
 //! ```html
-//! {% for entry in tags | dictsort(sort="desc") %}
+//! {% for entry in tags | entries(sort="desc") %}
 //!   {{ entry.key }}: {{ entry.value | length }}
 //! {% endfor %}
 //! ```
@@ -18,11 +18,11 @@ use tera::{Map, Tera, Value};
 
 pub fn register(env: &mut Tera) {
     env.register_filter(
-        "dictsort",
+        "entries",
         |value: &Value, args: &HashMap<String, Value>| -> tera::Result<Value> {
             let map = value
                 .as_object()
-                .ok_or_else(|| tera::Error::msg("dictsort filter: input must be a map"))?;
+                .ok_or_else(|| tera::Error::msg("entries filter: input must be a map"))?;
             let descending = sort_is_descending(args)?;
 
             // serde_json::Map iterates in insertion order; collect and sort by
@@ -57,7 +57,7 @@ fn sort_is_descending(args: &HashMap<String, Value>) -> tera::Result<bool> {
         Some(Value::String(s)) if s == "asc" => Ok(false),
         Some(Value::String(s)) if s == "desc" => Ok(true),
         Some(_) => Err(tera::Error::msg(
-            "dictsort filter: `sort` must be \"asc\" or \"desc\"",
+            "entries filter: `sort` must be \"asc\" or \"desc\"",
         )),
     }
 }
