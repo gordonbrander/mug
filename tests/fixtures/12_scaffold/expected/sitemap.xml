@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <url><loc>https://example.com/sitemap.xml</loc></url>
+<url><loc>https://example.com/backlinks.html</loc></url>
+<url><loc>https://example.com/wikilinks.html</loc></url>
+<url><loc>https://example.com/digital-garden.html</loc></url>
 <url><loc>https://example.com/</loc></url>
-<url><loc>https://example.com/2026/01/01/hello/</loc></url>
 </urlset>

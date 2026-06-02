@@ -1,0 +1,283 @@
+/* Obsidian theme for mug.
+ *
+ * Content typography ported from Kepano's Minimal theme for Obsidian
+ * (https://github.com/kepano/obsidian-minimal). Colors follow Minimal's
+ * dynamic-HSL model: a base color drives backgrounds, text, and borders; an
+ * accent color drives links. The dark palette swaps in via prefers-color-scheme.
+ */
+
+:root {
+  /* Minimal default base (light) + accent. */
+  --base-h: 0;
+  --base-s: 0%;
+  --base-l: 96%;
+  --accent-h: 201;
+  --accent-s: 17%;
+  --accent-l: 50%;
+
+  --bg1: white; /* background-primary */
+  --bg2: hsl(var(--base-h), var(--base-s), var(--base-l)); /* background-secondary */
+  --ui1: hsl(var(--base-h), var(--base-s), calc(var(--base-l) - 6%)); /* border */
+  --ui2: hsl(var(--base-h), var(--base-s), calc(var(--base-l) - 12%)); /* quote border */
+  --tx1: hsl(var(--base-h), var(--base-s), calc(var(--base-l) - 90%)); /* text-normal */
+  --tx2: hsl(var(--base-h), calc(var(--base-s) - 20%), calc(var(--base-l) - 50%)); /* muted */
+  --tx3: hsl(var(--base-h), calc(var(--base-s) - 10%), calc(var(--base-l) - 25%)); /* faint */
+  --ax1: hsl(var(--accent-h), var(--accent-s), var(--accent-l)); /* link */
+  --ax2: hsl(var(--accent-h), var(--accent-s), calc(var(--accent-l) - 8%)); /* link hover */
+
+  --font-text: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+    Ubuntu, sans-serif;
+  --font-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    monospace;
+
+  --line-width: 40rem;
+  --line-height: 1.5;
+  --p-spacing: 1.75rem;
+  --heading-spacing: 2em;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --base-l: 15%;
+    --accent-l: 60%;
+
+    --bg1: hsl(var(--base-h), var(--base-s), var(--base-l));
+    --bg2: hsl(var(--base-h), var(--base-s), calc(var(--base-l) - 2%));
+    --ui1: hsl(var(--base-h), var(--base-s), calc(var(--base-l) + 6%));
+    --ui2: hsl(var(--base-h), var(--base-s), calc(var(--base-l) + 12%));
+    --tx1: hsl(var(--base-h), calc(var(--base-s) - 10%), calc(var(--base-l) + 67%));
+    --tx2: hsl(var(--base-h), calc(var(--base-s) - 20%), calc(var(--base-l) + 45%));
+    --tx3: hsl(var(--base-h), calc(var(--base-s) - 10%), calc(var(--base-l) + 20%));
+  }
+}
+
+/* Layout */
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  background: var(--bg1);
+  color: var(--tx1);
+  font-family: var(--font-text);
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: var(--line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+.site-header,
+.markdown {
+  max-width: var(--line-width);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.site-header {
+  padding-top: 2rem;
+  padding-bottom: 1rem;
+}
+
+.site-title {
+  color: var(--tx2);
+  font-weight: 600;
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.site-title:hover {
+  color: var(--tx1);
+}
+
+.markdown {
+  padding-bottom: 6rem;
+}
+
+/* Headings — Minimal's compact, tight type scale. */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: var(--heading-spacing) 0 0;
+  line-height: 1.3;
+  color: var(--tx1);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  font-size: 1.125em;
+  font-weight: 600;
+}
+h2 {
+  font-size: 1.05em;
+  font-weight: 600;
+}
+h3 {
+  font-size: 1em;
+  font-weight: 500;
+}
+h4 {
+  font-size: 0.9em;
+  font-weight: 500;
+}
+h5 {
+  font-size: 0.85em;
+  font-weight: 500;
+  font-variant: small-caps;
+}
+h6 {
+  font-size: 0.85em;
+  font-weight: 400;
+  font-variant: small-caps;
+}
+
+.note > h1:first-child {
+  margin-top: 0;
+}
+
+/* Body text */
+
+p {
+  margin: var(--p-spacing) 0;
+}
+
+a {
+  color: var(--ax1);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--ax2);
+  text-decoration: underline;
+}
+
+/* Unresolved wikilinks: mug renders [[Missing]] as <span class="nolink">. */
+.nolink {
+  color: var(--tx3);
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--ui1);
+  margin: var(--heading-spacing) 0;
+}
+
+/* Lists */
+
+ul,
+ol {
+  padding-left: 2em;
+}
+
+li {
+  padding: 0.075em 0;
+}
+
+/* Blockquotes */
+
+blockquote {
+  margin: var(--p-spacing) 0;
+  padding-left: 1.1em;
+  border-left: 1px solid var(--ui2);
+  color: var(--tx2);
+  font-style: normal;
+}
+
+/* Code */
+
+code,
+pre {
+  font-family: var(--font-monospace);
+  font-size: 0.875em;
+}
+
+code {
+  background: var(--ui1);
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--bg2);
+  border: 1px solid var(--ui1);
+  border-radius: 4px;
+  padding: 1em;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* Images */
+
+img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* Tables */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--p-spacing) 0;
+  font-size: 0.9em;
+}
+
+th,
+td {
+  border: 1px solid var(--ui1);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+
+th {
+  font-weight: 600;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--bg2);
+}
+
+/* Backlinks ("Linked references") */
+
+.backlinks {
+  max-width: var(--line-width);
+  margin: 4rem auto 0;
+  padding: 1.5rem 1.5rem 0;
+  border-top: 1px solid var(--ui1);
+}
+
+.backlinks h2 {
+  margin-top: 0;
+  font-size: 0.85em;
+  font-weight: 500;
+  font-variant: small-caps;
+  letter-spacing: 0;
+  color: var(--tx2);
+}
+
+.backlinks ul,
+.note-list {
+  list-style: none;
+  padding-left: 0;
+}

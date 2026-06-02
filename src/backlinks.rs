@@ -7,6 +7,7 @@ pub struct Backlinks {
     pub order_by: OrderKey,
     pub sort: SortDir,
     pub omit: Vec<PathBuf>,
+    pub limit: Option<usize>,
 }
 
 impl Default for Backlinks {
@@ -15,6 +16,7 @@ impl Default for Backlinks {
             order_by: OrderKey::Date,
             sort: SortDir::Desc,
             omit: Vec::new(),
+            limit: None,
         }
     }
 }
@@ -49,6 +51,10 @@ pub fn list_backlinks<'a>(
         // order (the generator path passes a filesystem-walk-ordered `Vec`).
         cmp.then_with(|| a.id_path.cmp(&b2.id_path))
     });
+
+    if let Some(n) = b.limit {
+        results.truncate(n);
+    }
 
     results
 }
@@ -171,6 +177,41 @@ mod tests {
         let results = list_backlinks(&docs, Path::new("target.md"), &b);
         let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
         assert_eq!(titles, vec!["A"]);
+    }
+
+    #[test]
+    fn list_backlinks_applies_limit() {
+        let docs = vec![
+            doc("a.md", "A", "2025-01-01", &["target.md"]),
+            doc("b.md", "B", "2025-02-01", &["target.md"]),
+            doc("c.md", "C", "2025-03-01", &["target.md"]),
+        ];
+        let b = Backlinks {
+            limit: Some(2),
+            ..Default::default()
+        };
+        // Default order is date desc, so the newest two survive the truncate.
+        let results = list_backlinks(&docs, Path::new("target.md"), &b);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["C", "B"]);
+    }
+
+    #[test]
+    fn list_backlinks_omit_then_limit_compose() {
+        // omit drops a doc first, then limit truncates the remainder.
+        let docs = vec![
+            doc("a.md", "A", "2025-01-01", &["target.md"]),
+            doc("b.md", "B", "2025-02-01", &["target.md"]),
+            doc("c.md", "C", "2025-03-01", &["target.md"]),
+        ];
+        let b = Backlinks {
+            omit: vec![PathBuf::from("c.md")],
+            limit: Some(1),
+            ..Default::default()
+        };
+        let results = list_backlinks(&docs, Path::new("target.md"), &b);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["B"]);
     }
 
     #[test]

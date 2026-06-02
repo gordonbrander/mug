@@ -1,0 +1,5 @@
+collections:
+  posts:
+    path: "posts/*.md"
+    order_by: date
+    sort: desc

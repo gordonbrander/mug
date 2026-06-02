@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tera::{Tera, Value};
 
-const KNOWN_KEYS: &[&str] = &["order_by", "sort", "omit"];
+const KNOWN_KEYS: &[&str] = &["order_by", "sort", "omit", "limit"];
 
 /// Register `backlinks` as a Tera filter on `env`. Usage:
 /// `{{ doc.id_path | backlinks(order_by="title", sort="asc") }}`. The piped
@@ -91,6 +91,13 @@ fn from_kwargs(args: &HashMap<String, Value>) -> tera::Result<Backlinks> {
             .collect::<tera::Result<Vec<_>>>()?;
     }
 
+    if let Some(v) = args.get("limit") {
+        let n = v.as_u64().ok_or_else(|| {
+            tera::Error::msg("backlinks: `limit` must be a non-negative integer")
+        })?;
+        b.limit = Some(n as usize);
+    }
+
     Ok(b)
 }
 
@@ -127,15 +134,30 @@ mod tests {
     }
 
     #[test]
-    fn from_kwargs_rejects_path_and_tag_and_limit() {
-        // backlinks intentionally narrows the query surface to order_by/sort —
-        // other kwargs should fail loudly so authors don't think they did
-        // anything.
-        for k in &["path", "tag", "limit"] {
+    fn from_kwargs_rejects_path_and_tag() {
+        // backlinks intentionally narrows the query surface — `path`/`tag` are
+        // not meaningful here and should fail loudly so authors don't think they
+        // did anything.
+        for k in &["path", "tag"] {
             let mut args = HashMap::new();
             args.insert(k.to_string(), val_str("x"));
             assert!(from_kwargs(&args).is_err(), "key `{}` should error", k);
         }
+    }
+
+    #[test]
+    fn from_kwargs_parses_limit() {
+        let mut args = HashMap::new();
+        args.insert("limit".to_string(), Value::from(3u64));
+        let b = from_kwargs(&args).unwrap();
+        assert_eq!(b.limit, Some(3));
+    }
+
+    #[test]
+    fn from_kwargs_limit_not_integer_errors() {
+        let mut args = HashMap::new();
+        args.insert("limit".to_string(), val_str("3"));
+        assert!(from_kwargs(&args).is_err());
     }
 
     #[test]

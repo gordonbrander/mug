@@ -6,52 +6,52 @@ use std::path::Path;
 /// root and embedded at compile time. Add a row here to ship a new file.
 const SCAFFOLD_FILES: &[(&str, &str)] = &[
     ("config.yaml", include_str!("../../scaffold/config.yaml")),
+    // Content: a small interlinked digital garden. Each note links to others
+    // with [[wikilinks]] so the obsidian theme's backlinks have something to show.
     ("content/index.md", include_str!("../../scaffold/content/index.md")),
     (
-        "content/posts/hello.md",
-        include_str!("../../scaffold/content/posts/hello.md"),
+        "content/digital-garden.md",
+        include_str!("../../scaffold/content/digital-garden.md"),
     ),
     (
-        "templates/base.html",
-        include_str!("../../scaffold/templates/base.html"),
+        "content/wikilinks.md",
+        include_str!("../../scaffold/content/wikilinks.md"),
     ),
     (
-        "templates/home.html",
-        include_str!("../../scaffold/templates/home.html"),
-    ),
-    (
-        "templates/post.html",
-        include_str!("../../scaffold/templates/post.html"),
-    ),
-    (
-        "templates/archive.html",
-        include_str!("../../scaffold/templates/archive.html"),
-    ),
-    (
-        "templates/tag.html",
-        include_str!("../../scaffold/templates/tag.html"),
-    ),
-    (
-        "templates/sitemap.xml",
-        include_str!("../../scaffold/templates/sitemap.xml"),
+        "content/backlinks.md",
+        include_str!("../../scaffold/content/backlinks.md"),
     ),
     (
         "content/sitemap.html",
         include_str!("../../scaffold/content/sitemap.html"),
     ),
-    (
-        "archives/rss.xml",
-        include_str!("../../scaffold/archives/rss.xml"),
-    ),
-    (
-        "archives/posts.html",
-        include_str!("../../scaffold/archives/posts.html"),
-    ),
-    (
-        "archives/tags.html",
-        include_str!("../../scaffold/archives/tags.html"),
-    ),
     ("static/.gitkeep", include_str!("../../scaffold/static/.gitkeep")),
+    // The bundled "obsidian" theme: templates, styles, and config defaults for a
+    // wiki / digital garden. Activated by `theme: themes/obsidian` in config.yaml.
+    (
+        "themes/obsidian/config.yaml",
+        include_str!("../../scaffold/themes/obsidian/config.yaml"),
+    ),
+    (
+        "themes/obsidian/templates/base.html",
+        include_str!("../../scaffold/themes/obsidian/templates/base.html"),
+    ),
+    (
+        "themes/obsidian/templates/note.html",
+        include_str!("../../scaffold/themes/obsidian/templates/note.html"),
+    ),
+    (
+        "themes/obsidian/templates/index.html",
+        include_str!("../../scaffold/themes/obsidian/templates/index.html"),
+    ),
+    (
+        "themes/obsidian/templates/sitemap.xml",
+        include_str!("../../scaffold/themes/obsidian/templates/sitemap.xml"),
+    ),
+    (
+        "themes/obsidian/static/style.css",
+        include_str!("../../scaffold/themes/obsidian/static/style.css"),
+    ),
 ];
 
 /// Scaffold a starter site into `target`. Errors if `target` already exists at
@@ -103,12 +103,12 @@ mod tests {
 
     #[test]
     fn creates_nested_parent_dirs() {
-        // content/posts/hello.md requires nested-dir creation.
+        // themes/obsidian/templates/base.html requires nested-dir creation.
         let dir = temp_path("nested");
         run(&dir).unwrap();
-        assert!(dir.join("content/posts/hello.md").exists());
-        assert!(dir.join("templates/base.html").exists());
-        assert!(dir.join("archives/rss.xml").exists());
+        assert!(dir.join("content/index.md").exists());
+        assert!(dir.join("themes/obsidian/templates/base.html").exists());
+        assert!(dir.join("themes/obsidian/static/style.css").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

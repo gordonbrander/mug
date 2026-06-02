@@ -3,29 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Home | My Site</title>
+  <title>Home | My Garden</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <h1><a href="/">My Site</a></h1>
-    <nav>
-      <a href="/">Home</a>
-      <a href="/posts/">Posts</a>
-    </nav>
+  <header class="site-header">
+    <a class="site-title" href="/">My Garden</a>
   </header>
-  <main>
+  <main class="markdown">
     
-<p>Welcome to My Site.</p>
+<article class="note">
+  <p>Welcome to My Garden — a <a class="wikilink" href="/digital-garden.html">Digital garden</a> built with mug.</p>
+<p>Start by editing the notes in <code>content/</code>, or link between them with
+<code>[[wikilinks]]</code>. Every note lists its <a class="wikilink" href="/backlinks.html">Backlinks</a> automatically.</p>
 
-<h2>Recent posts</h2>
-<ul class="post-list">
-  
-  <li>
-    <a href="https://example.com/2026/01/01/hello/">Hello, world</a>
-    <time datetime="2026-01-01">Jan 1, 2026</time>
-  </li>
-  
-</ul>
+  <h2>Notes</h2>
+  <ul class="note-list">
+    
+    <li><a href="/backlinks.html">Backlinks</a></li>
+    
+    <li><a href="/digital-garden.html">Digital garden</a></li>
+    
+    <li><a href="/wikilinks.html">Wikilinks</a></li>
+    
+  </ul>
+</article>
 
   </main>
 </body>

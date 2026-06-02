@@ -36,8 +36,10 @@ This puts `mug` on your `PATH` (typically `~/.cargo/bin/mug`).
 
 ## Quick start
 
-`mug new` scaffolds a starter site with a sample page, a sample post, a base
-template, a built-in RSS archive, and a sitemap page.
+`mug new` scaffolds a starter **digital garden**: a handful of interlinked notes
+and the bundled [`obsidian` theme](#themes), which supplies the layouts, styles,
+backlinks, and a sitemap. Open any note to see its backlinks; edit
+the theme under `themes/obsidian/`, or swap it out for your own templates.
 
 ```sh
 mug new my-site
@@ -53,6 +55,7 @@ archives/       # Generated archives (tags, collections, feeds, sitemaps, etc)
 templates/      # Tera layouts, partials, and macros.
 data/           # YAML files mixed into the global data cascade.
 static/         # Copied verbatim
+themes/         # Bundled themes (e.g. the `obsidian` digital-garden theme)
 config.yaml     # Site config
 ```
 
@@ -218,6 +221,12 @@ When a theme is set, Mug layers it underneath your site:
 A theme without a `config.yaml` still contributes its files. Themes don't nest:
 a `theme:` key inside a theme's own `config.yaml` is ignored.
 
+New sites ship with the **`obsidian`** theme under `themes/obsidian/` (active via
+`theme: themes/obsidian`). It's a wiki / digital-garden look — a backlinks-aware
+note layout with content typography ported from
+[Kepano's Minimal](https://github.com/kepano/obsidian-minimal), in light and dark
+— and a working example of the layout above to copy or customize.
+
 ## Permalinks
 
 By default a document renders to a location mirroring its source path. You can
@@ -366,6 +375,18 @@ collections:
 {% endfor %}
 ```
 
+Kwargs: `name` (required), plus optional `omit` (array of `id_path` strings to
+exclude) and `limit` (max items). These layer *on top of* the collection's own
+definition-time `omit`/`limit` — the cached result is filtered then truncated,
+with `omit` applied before `limit`. Handy when a page wants to exclude itself
+from a collection it belongs to:
+
+```jinja
+{% for post in collection(name="recent_posts", omit=[page.id_path], limit=5) %}
+  <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
+{% endfor %}
+```
+
 Available in: template phase.
 
 ### `taxonomy(...)` — list a taxonomy's terms
@@ -389,8 +410,8 @@ Available in: template phase.
 
 Kwargs: `order_by` (`title` | `date` | `updated`), `sort` (`asc` | `desc`),
 `omit` (array of `id_path` strings to exclude — e.g. `omit=[page.id_path]` to
-drop a page's self-link from its own backlinks). Default is
-`order_by=date, sort=desc`.
+drop a page's self-link from its own backlinks), and `limit` (max items).
+Default is `order_by=date, sort=desc`.
 
 Available in: template phase.
 

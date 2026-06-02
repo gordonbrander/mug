@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block content %}
+<article class="note">
+  {{ page.content | safe }}
+  <h2>Notes</h2>
+  <ul class="note-list">
+    {% for item in collection(name="notes") %}
+    <li><a href="{{ item.id_path | link }}">{{ item.title }}</a></li>
+    {% endfor %}
+  </ul>
+</article>
+{% endblock content %}

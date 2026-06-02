@@ -1,37 +1,12 @@
 site:
-  title: My Site
-  description: A site built with mug.
+  title: My Garden
+  description: A digital garden built with mug.
   # Origin used for absolute URLs in feeds and sitemaps. Edit before publishing.
   url: https://example.com
-  # Subpath the site is hosted under, e.g. "/blog". Leave empty for root.
+  # Subpath the site is hosted under, e.g. "/notes". Leave empty for root.
   base_path: ""
 
-# Named collections: saved queries over your content, evaluated once and cached.
-# Read them in templates with `{% for p in collection(name="posts") %}`. Options:
-# path (glob), order_by (title|date|updated), sort (asc|desc), limit, omit.
-collections:
-  posts:
-    path: "posts/*.md"
-    order_by: date
-    sort: desc
-  recent:
-    path: "posts/*.md"
-    order_by: date
-    sort: desc
-    limit: 20
-  # No `path` matches every document. Used by sitemap.xml.
-  all: {}
-
-# Default frontmatter applied to a collection's members. Values fill keys a
-# document didn't set itself (its own frontmatter always wins). Keyed by
-# collection name; when several entries cover a doc, the later one wins.
-defaults:
-  posts:
-    permalink: ":yyyy/:mm/:dd/:slug/"
-    template: post.html
-
-# Taxonomies: named classifications. Read a taxonomy in templates with
-# `{% for term, docs in taxonomy(name="tags") %}`, and generate per-term archive
-# pages with a `kind: taxonomy` file in `archives/` (see archives/tags.html).
-taxonomies:
-  - tags
+# Layer the bundled digital-garden theme: it supplies the templates, styles, and
+# config defaults (the `notes`/`all` collections and the default note layout).
+# Edit its files under themes/obsidian/, or override here — your config wins.
+theme: themes/obsidian
