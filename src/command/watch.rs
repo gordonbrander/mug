@@ -32,7 +32,7 @@ pub fn watch_loop<F>(mut on_rebuild: F) -> Result<()>
 where
     F: FnMut(&Result<()>),
 {
-    let (config, _) = Config::load(Path::new("config.yaml"))?;
+    let (config, _) = Config::load_with_theme(Path::new("config.yaml"))?;
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(DEBOUNCE, tx)?;
 

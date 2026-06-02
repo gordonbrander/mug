@@ -15,7 +15,7 @@
 //! never appear in `collection()`/`taxonomy()`.
 
 use crate::build::markup;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::doc::{Doc, DocMeta};
 use crate::doc_index::DocIndex;
 use crate::permalink;
@@ -27,9 +27,8 @@ use rayon::prelude::*;
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use walkdir::WalkDir;
 
 /// One file in `archives/`. The body is the Tera template each emitted page
 /// renders; `kind` selects what it iterates.
@@ -139,42 +138,30 @@ fn required_name(data: &Mapping, key: &str, id_path: &std::path::Path) -> Result
         })
 }
 
+/// Whether `path`'s file name starts with a dot (e.g. `.DS_Store`). Such files
+/// are skipped when collecting archives.
+fn is_dotfile(path: &Path) -> bool {
+    path.file_name()
+        .map(|n| n.to_string_lossy().starts_with('.'))
+        .unwrap_or(false)
+}
+
 pub fn run(
     config: &Config,
     site_data: &SiteData,
     classification: &Arc<DocIndex>,
 ) -> Result<Vec<Doc>> {
-    // Walk the archive roots in overlay order (theme then site). A site archive
-    // with the same `id_path` as a theme archive replaces it, so the site wins —
-    // the same per-path override the templates and static layers give.
+    // Walk the archive roots in overlay order (theme then site), deduped per
+    // `id_path` so a site archive replaces a theme archive of the same name — the
+    // same per-path override the templates and static layers give. Dotfiles are
+    // skipped; `id_path` is the path relative to its root.
     let mut archives: Vec<Archive> = Vec::new();
-    for root in config.archive_roots() {
-        if !root.exists() {
-            continue;
-        }
-        for entry in WalkDir::new(&root) {
-            let entry = entry.with_context(|| format!("walking {}", root.display()))?;
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            if entry.file_name().to_string_lossy().starts_with('.') {
-                continue;
-            }
-            let path = entry.path();
-            let id_path = path
-                .strip_prefix(&root)
-                .with_context(|| format!("stripping prefix from {}", path.display()))?
-                .to_path_buf();
-            let source =
-                fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-            let a = Archive::parse(id_path.clone(), &source)
-                .with_context(|| format!("parsing archive {}", path.display()))?;
-            if let Some(slot) = archives.iter_mut().find(|x| x.id_path == id_path) {
-                *slot = a;
-            } else {
-                archives.push(a);
-            }
-        }
+    for (id_path, path) in config::overlay_files(&config.archive_roots(), |p| !is_dotfile(p))? {
+        let source =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let a = Archive::parse(id_path, &source)
+            .with_context(|| format!("parsing archive {}", path.display()))?;
+        archives.push(a);
     }
 
     if archives.is_empty() {
@@ -327,6 +314,7 @@ fn epoch() -> DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::tempdir;
 
     #[test]
     fn parse_collection_archive() {
@@ -382,17 +370,6 @@ mod tests {
     fn parse_taxonomy_kind_requires_taxonomy_name() {
         let source = "---\nkind: taxonomy\npermalink: /tags/:term/\n---\nBODY";
         assert!(Archive::parse(PathBuf::from("x.html"), source).is_err());
-    }
-
-    fn tempdir(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir()
-            .join(format!("mug-archive-{}-{}-{}", name, std::process::id(), nanos));
-        fs::create_dir_all(&dir).unwrap();
-        dir
     }
 
     fn write_archive(base: &std::path::Path, layer: &str, rel: &str, body: &str) {

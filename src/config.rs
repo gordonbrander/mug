@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -86,20 +87,22 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Load `config.yaml` if present. Returns the typed `Config` (with absent
-    /// keys filled from `Default`) and the raw `site:` sub-mapping, which is
-    /// surfaced to templates as `{{ site }}`. A missing file yields defaults
-    /// and an empty site map so zero-config sites still build.
+    /// Load `config.yaml` (resolving a theme if one is set) into the typed
+    /// `Config` and the raw `site:` sub-mapping surfaced to templates as
+    /// `{{ site }}`. A missing file yields defaults and an empty site map so
+    /// zero-config sites still build.
     ///
     /// When the file sets `theme:`, the theme's own `config.yaml` is loaded and
     /// layered underneath: it supplies templates/archives directories and config
     /// defaults (collections, taxonomies, defaults, `site:` metadata) that the
-    /// site overrides. See [`apply_theme`](Self::apply_theme).
-    pub fn load(path: &Path) -> Result<(Self, Mapping)> {
-        let (mut config, mut site) = Self::load_one(path)?;
+    /// site overrides. See [`apply_theme`](Self::apply_theme). The `site_url` and
+    /// `base_path` fields are derived once here from the final (possibly merged)
+    /// `site` map.
+    pub fn load_with_theme(path: &Path) -> Result<(Self, Mapping)> {
+        let (mut config, mut site) = Self::load(path)?;
         if let Some(theme_dir) = config.theme.clone() {
             let theme_config_path = theme_dir.join("config.yaml");
-            let (theme_config, theme_site) = Self::load_one(&theme_config_path)
+            let (theme_config, theme_site) = Self::load(&theme_config_path)
                 .with_context(|| format!("loading theme at {}", theme_dir.display()))?;
             config.apply_theme(&mut site, theme_config, theme_site);
         }
@@ -107,15 +110,26 @@ impl Config {
         // theme declares, so the check runs against the merged collection set.
         validate_defaults(&config.defaults, &config.collections)
             .with_context(|| format!("validating `defaults` in {}", path.display()))?;
+        // Derive the URL fields once, from the final (possibly theme-merged) map.
+        config.site_url = site
+            .get(Value::String("url".into()))
+            .and_then(|v| v.as_str())
+            .and_then(normalize_site_url);
+        config.base_path = site
+            .get(Value::String("base_path".into()))
+            .and_then(|v| v.as_str())
+            .map(normalize_base_path)
+            .unwrap_or_default();
         Ok((config, site))
     }
 
     /// Load and parse a single `config.yaml` (no theme resolution). Returns the
     /// typed `Config` and the raw `site:` sub-mapping. `defaults:` are parsed but
-    /// **not** validated against `collections:` here — validation is deferred to
-    /// [`load`] so it can see a theme's collections too. A missing file yields
-    /// defaults and an empty site map.
-    fn load_one(path: &Path) -> Result<(Self, Mapping)> {
+    /// **not** validated against `collections:` here, and `site_url`/`base_path`
+    /// are **not** derived here — both are deferred to
+    /// [`load_with_theme`](Self::load_with_theme) so they see a theme's merged
+    /// values. A missing file yields defaults and an empty site map.
+    fn load(path: &Path) -> Result<(Self, Mapping)> {
         if !path.exists() {
             return Ok((Self::default(), Mapping::new()));
         }
@@ -158,15 +172,6 @@ impl Config {
         // Parse the declared taxonomies (an absent block yields none).
         config.taxonomies = taxonomy::parse(taxonomies_map.as_ref())
             .with_context(|| format!("parsing `taxonomies` in {}", path.display()))?;
-        config.site_url = site
-            .get(Value::String("url".into()))
-            .and_then(|v| v.as_str())
-            .and_then(normalize_site_url);
-        config.base_path = site
-            .get(Value::String("base_path".into()))
-            .and_then(|v| v.as_str())
-            .map(normalize_base_path)
-            .unwrap_or_default();
         Ok((config, site))
     }
 
@@ -201,20 +206,11 @@ impl Config {
         self.taxonomies = taxonomies;
         // A theme may enable the hashtag pass; the site can also enable it.
         self.hashtags = self.hashtags || theme.hashtags;
-        // `site:` map: theme as base, site overrides (deep). Re-derive the URL
-        // fields from the merged map.
+        // `site:` map: theme as base, site overrides (deep). The caller
+        // (`load_with_theme`) derives `site_url`/`base_path` from the merged map.
         let mut merged = theme_site;
         deep_merge(&mut merged, std::mem::take(site));
         *site = merged;
-        self.site_url = site
-            .get(Value::String("url".into()))
-            .and_then(|v| v.as_str())
-            .and_then(normalize_site_url);
-        self.base_path = site
-            .get(Value::String("base_path".into()))
-            .and_then(|v| v.as_str())
-            .map(normalize_base_path)
-            .unwrap_or_default();
     }
 
     /// The theme's conventional `<name>/` subdir, if a theme is configured.
@@ -235,11 +231,6 @@ impl Config {
         }
         roots.push(site_dir.to_path_buf());
         roots
-    }
-
-    /// The theme's `static/` directory, if a theme is configured.
-    pub fn theme_static(&self) -> Option<PathBuf> {
-        self.theme_subdir("static")
     }
 
     /// Ordered `static/` source roots (theme then site). The static-copy phase
@@ -277,6 +268,44 @@ fn merge_named<T>(mut base: Vec<(String, T)>, overrides: Vec<(String, T)>) -> Ve
         }
     }
     base
+}
+
+/// Walk `roots` in order; key each file kept by `keep` to its path relative to
+/// its root. A later root's file replaces an earlier one's under the same key,
+/// in place (so the site overlays the theme), preserving first-seen order.
+/// Returns `(rel path, full path)` pairs. The filesystem analog of
+/// [`merge_named`]: callers feed it the `*_roots()` overlay order and consume the
+/// deduplicated pairs (archives parse them, the Tera loader registers them).
+pub(crate) fn overlay_files(
+    roots: &[PathBuf],
+    keep: impl Fn(&Path) -> bool,
+) -> Result<Vec<(PathBuf, PathBuf)>> {
+    let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for root in roots {
+        if !root.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(root) {
+            let entry = entry.with_context(|| format!("walking {}", root.display()))?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if !keep(path) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .with_context(|| format!("stripping prefix from {}", path.display()))?
+                .to_path_buf();
+            if let Some(slot) = files.iter_mut().find(|(r, _)| *r == rel) {
+                slot.1 = path.to_path_buf();
+            } else {
+                files.push((rel, path.to_path_buf()));
+            }
+        }
+    }
+    Ok(files)
 }
 
 /// Recursively merge `over` into `base`: nested mappings merge key-by-key; any
@@ -374,6 +403,7 @@ fn normalize_base_path(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::{cleanup, tempdir};
     use std::io::Write;
 
     fn write_config(dir: &Path, body: &str) -> PathBuf {
@@ -386,7 +416,7 @@ mod tests {
     #[test]
     fn missing_file_yields_defaults() {
         let path = Path::new("/definitely/does/not/exist/config.yaml");
-        let (config, site) = Config::load(path).unwrap();
+        let (config, site) = Config::load_with_theme(path).unwrap();
         assert_eq!(config.content_dir, PathBuf::from("content"));
         assert_eq!(config.output_dir, PathBuf::from("public"));
         assert!(site.is_empty());
@@ -394,9 +424,9 @@ mod tests {
 
     #[test]
     fn partial_overrides_keep_defaults_for_missing_keys() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "output_dir: build\n");
-        let (config, site) = Config::load(&path).unwrap();
+        let (config, site) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.output_dir, PathBuf::from("build"));
         assert_eq!(config.content_dir, PathBuf::from("content"));
         assert!(site.is_empty());
@@ -405,12 +435,12 @@ mod tests {
 
     #[test]
     fn site_submap_is_extracted() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(
             &dir,
             "site:\n  title: My Site\n  description: A blog\n",
         );
-        let (_, site) = Config::load(&path).unwrap();
+        let (_, site) = Config::load_with_theme(&path).unwrap();
         assert_eq!(
             site.get(Value::String("title".into()))
                 .and_then(|v| v.as_str()),
@@ -421,9 +451,9 @@ mod tests {
 
     #[test]
     fn site_absent_yields_empty_map() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "content_dir: foo\n");
-        let (_, site) = Config::load(&path).unwrap();
+        let (_, site) = Config::load_with_theme(&path).unwrap();
         assert!(site.is_empty());
         cleanup(&dir);
     }
@@ -454,12 +484,12 @@ mod tests {
 
     #[test]
     fn site_url_and_base_path_loaded_from_site_submap() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(
             &dir,
             "site:\n  url: https://example.com/\n  base_path: blog\n",
         );
-        let (config, site) = Config::load(&path).unwrap();
+        let (config, site) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.site_url.as_deref(), Some("https://example.com"));
         assert_eq!(config.base_path, "/blog");
         // Raw site map still surfaces the original values for templates.
@@ -473,9 +503,9 @@ mod tests {
 
     #[test]
     fn site_url_and_base_path_default_when_absent() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "site:\n  title: My Site\n");
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert!(config.site_url.is_none());
         assert_eq!(config.base_path, "");
         cleanup(&dir);
@@ -483,12 +513,12 @@ mod tests {
 
     #[test]
     fn defaults_block_is_parsed() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(
             &dir,
             "collections:\n  posts:\n    path: \"posts/*.md\"\ndefaults:\n  posts:\n    permalink: \":yyyy/:mm/:dd/:slug\"\n",
         );
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         // Parsed as a (collection name, frontmatter) pair.
         assert_eq!(config.defaults.len(), 1);
         let (name, fm) = &config.defaults[0];
@@ -503,21 +533,21 @@ mod tests {
 
     #[test]
     fn defaults_referencing_unknown_collection_errors() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         // No `collections:` block → `posts` is unknown.
         let path = write_config(&dir, "defaults:\n  posts:\n    template: post.html\n");
-        assert!(Config::load(&path).is_err());
+        assert!(Config::load_with_theme(&path).is_err());
         cleanup(&dir);
     }
 
     #[test]
     fn collections_block_is_parsed() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(
             &dir,
             "collections:\n  posts:\n    path: \"posts/*.md\"\n    limit: 5\n  recent:\n    order_by: updated\n",
         );
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
         // Order preserved from config.yaml.
         assert_eq!(names, vec!["posts", "recent"]);
@@ -529,18 +559,18 @@ mod tests {
 
     #[test]
     fn taxonomies_absent_yields_empty() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "content_dir: foo\n");
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert!(config.taxonomies.is_empty());
         cleanup(&dir);
     }
 
     #[test]
     fn taxonomies_block_parsed_in_declaration_order() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "taxonomies:\n  - tags\n  - categories\n  - series\n");
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.taxonomies, vec!["tags", "categories", "series"]);
         cleanup(&dir);
     }
@@ -548,32 +578,32 @@ mod tests {
     #[test]
     fn missing_file_yields_empty_taxonomies() {
         let path = Path::new("/definitely/does/not/exist/config.yaml");
-        let (config, _) = Config::load(path).unwrap();
+        let (config, _) = Config::load_with_theme(path).unwrap();
         assert!(config.taxonomies.is_empty());
     }
 
     #[test]
     fn collections_absent_yields_empty() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "content_dir: foo\n");
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert!(config.collections.is_empty());
         cleanup(&dir);
     }
 
     #[test]
     fn collections_unknown_query_key_errors() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "collections:\n  bad:\n    paht: x\n");
-        assert!(Config::load(&path).is_err());
+        assert!(Config::load_with_theme(&path).is_err());
         cleanup(&dir);
     }
 
     #[test]
     fn defaults_absent_yields_empty() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let path = write_config(&dir, "content_dir: foo\n");
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert!(config.defaults.is_empty());
         cleanup(&dir);
     }
@@ -581,7 +611,7 @@ mod tests {
     #[test]
     fn no_config_file_yields_empty_url_fields() {
         let path = Path::new("/definitely/does/not/exist/config.yaml");
-        let (config, _) = Config::load(path).unwrap();
+        let (config, _) = Config::load_with_theme(path).unwrap();
         assert!(config.site_url.is_none());
         assert_eq!(config.base_path, "");
     }
@@ -594,11 +624,11 @@ mod tests {
 
     #[test]
     fn theme_overlays_templates_archives_and_static_roots() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("themes/demo");
         write_config_in(&theme, "site:\n  title: Demo\n");
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         // Site dirs keep their site values; the theme is overlaid beneath via the
         // `*_roots` helpers (theme first, site last — site wins).
         assert_eq!(config.templates_dir, PathBuf::from("templates"));
@@ -611,7 +641,10 @@ mod tests {
             config.archive_roots(),
             vec![theme.join("archives"), PathBuf::from("archives")]
         );
-        assert_eq!(config.theme_static(), Some(theme.join("static")));
+        assert_eq!(
+            config.static_roots(),
+            vec![theme.join("static"), PathBuf::from("static")]
+        );
         // content/output/data stay site-only.
         assert_eq!(config.content_dir, PathBuf::from("content"));
         assert_eq!(config.output_dir, PathBuf::from("public"));
@@ -621,29 +654,29 @@ mod tests {
 
     #[test]
     fn theme_ignores_its_own_dir_names() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         // A theme always contributes its conventional subdirs regardless of any
         // `*_dir` keys in its own config.yaml.
         write_config_in(&theme, "templates_dir: layouts\narchives_dir: views\nstatic_dir: assets\n");
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.template_roots()[0], theme.join("templates"));
         assert_eq!(config.archive_roots()[0], theme.join("archives"));
-        assert_eq!(config.theme_static(), Some(theme.join("static")));
+        assert_eq!(config.static_roots()[0], theme.join("static"));
         cleanup(&dir);
     }
 
     #[test]
     fn theme_without_config_resolves_conventional_dirs() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         fs::create_dir_all(&theme).unwrap(); // no config.yaml inside
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.template_roots()[0], theme.join("templates"));
         assert_eq!(config.archive_roots()[0], theme.join("archives"));
-        assert_eq!(config.theme_static(), Some(theme.join("static")));
+        assert_eq!(config.static_roots()[0], theme.join("static"));
         cleanup(&dir);
     }
 
@@ -656,11 +689,11 @@ mod tests {
 
     #[test]
     fn static_roots_orders_theme_before_site() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         write_config_in(&theme, "");
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert_eq!(
             config.static_roots(),
             vec![theme.join("static"), PathBuf::from("static")]
@@ -676,7 +709,7 @@ mod tests {
 
     #[test]
     fn theme_collections_merge_with_site_winning_by_name() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         write_config_in(
             &theme,
@@ -686,7 +719,7 @@ mod tests {
             &dir,
             &format!("theme: {}\ncollections:\n  posts:\n    limit: 10\n", theme.display()),
         );
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
         // Theme order preserved; site override keeps the theme's slot.
         assert_eq!(names, vec!["posts", "news"]);
@@ -697,21 +730,21 @@ mod tests {
 
     #[test]
     fn theme_taxonomies_merge_and_dedup() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         write_config_in(&theme, "taxonomies:\n  - tags\n  - categories\n");
         let path = write_config(
             &dir,
             &format!("theme: {}\ntaxonomies:\n  - tags\n  - series\n", theme.display()),
         );
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.taxonomies, vec!["tags", "categories", "series"]);
         cleanup(&dir);
     }
 
     #[test]
     fn site_defaults_may_reference_theme_collection() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         // Collection lives only in the theme.
         write_config_in(&theme, "collections:\n  posts:\n    path: \"posts/*.md\"\n");
@@ -723,7 +756,7 @@ mod tests {
             ),
         );
         // Validates post-merge, so referencing the theme's collection is fine.
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert_eq!(config.defaults.len(), 1);
         assert_eq!(config.defaults[0].0, "posts");
         cleanup(&dir);
@@ -731,7 +764,7 @@ mod tests {
 
     #[test]
     fn theme_site_map_deep_merges_with_site_winning() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         write_config_in(
             &theme,
@@ -741,7 +774,7 @@ mod tests {
             &dir,
             &format!("theme: {}\nsite:\n  title: Site Title\n  url: https://site.example/\n", theme.display()),
         );
-        let (config, site) = Config::load(&path).unwrap();
+        let (config, site) = Config::load_with_theme(&path).unwrap();
         // Site key wins; theme-only key kept.
         assert_eq!(
             site.get(Value::String("title".into())).and_then(|v| v.as_str()),
@@ -758,31 +791,13 @@ mod tests {
 
     #[test]
     fn theme_hashtags_enable_propagates() {
-        let dir = tempdir();
+        let dir = tempdir("config");
         let theme = dir.join("theme");
         write_config_in(&theme, "hashtags: true\n");
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
-        let (config, _) = Config::load(&path).unwrap();
+        let (config, _) = Config::load_with_theme(&path).unwrap();
         assert!(config.hashtags);
         cleanup(&dir);
     }
 
-    fn tempdir() -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("mug-config-{}-{}", std::process::id(), rand_u32()));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn cleanup(dir: &Path) {
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    fn rand_u32() -> u32 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0)
-    }
 }

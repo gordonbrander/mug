@@ -282,6 +282,7 @@ pub(crate) fn parse_date(value: Option<&Value>) -> Option<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::tempdir;
     use serde_yaml_ng::Value;
     use std::fs;
     use std::io::Write;
@@ -457,7 +458,7 @@ mod tests {
 
     #[test]
     fn load_uses_frontmatter_date_when_present() {
-        let dir = tempdir();
+        let dir = tempdir("doc");
         let path = dir.join("post.md");
         let mut f = fs::File::create(&path).unwrap();
         writeln!(f, "---\ndate: 2025-10-31\n---\nbody").unwrap();
@@ -520,7 +521,7 @@ mod tests {
 
     #[test]
     fn load_dispatches_yaml_to_parse_yaml() {
-        let dir = tempdir();
+        let dir = tempdir("doc");
         let path = dir.join("doc.yaml");
         fs::write(&path, "title: From YAML\ncontent: \"<p>hi</p>\"\n").unwrap();
         let d = Doc::load(&dir, Path::new("doc.yaml"), &tax()).unwrap();
@@ -531,7 +532,7 @@ mod tests {
 
     #[test]
     fn load_falls_back_to_fs_metadata_when_no_date() {
-        let dir = tempdir();
+        let dir = tempdir("doc");
         let path = dir.join("post.md");
         fs::write(&path, "# Hello\n").unwrap();
         let d = Doc::load(&dir, Path::new("post.md"), &tax()).unwrap();
@@ -571,16 +572,5 @@ mod tests {
         d.uplift_frontmatter(&taxonomies);
         assert_eq!(d.template.as_deref(), Some("post.html"));
         assert_eq!(d.terms["categories"]["tech"], "Tech");
-    }
-
-    fn tempdir() -> PathBuf {
-        let mut p = std::env::temp_dir();
-        p.push(format!(
-            "mug-doc-test-{}-{}",
-            std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
-        ));
-        fs::create_dir_all(&p).unwrap();
-        p
     }
 }

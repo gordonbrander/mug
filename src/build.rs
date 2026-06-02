@@ -42,7 +42,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub fn run(include_drafts: bool) -> Result<()> {
-    let (config, site) = Config::load(Path::new("config.yaml"))?;
+    let (config, site) = Config::load_with_theme(Path::new("config.yaml"))?;
     let site_data = SiteData::load(&config, site)?;
     let mut index = read::run(&config, include_drafts)?;
     // Collections classify from frontmatter (pre-markup).

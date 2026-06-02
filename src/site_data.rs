@@ -61,24 +61,9 @@ fn load_data(config: &Config) -> Result<Mapping> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::{cleanup, tempdir};
     use std::io::Write;
-    use std::path::{Path, PathBuf};
-
-    fn tempdir() -> PathBuf {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let dir =
-            std::env::temp_dir().join(format!("mug-sitedata-{}-{}", std::process::id(), nanos));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn cleanup(dir: &Path) {
-        let _ = fs::remove_dir_all(dir);
-    }
+    use std::path::Path;
 
     fn write(path: &Path, body: &str) {
         if let Some(parent) = path.parent() {
@@ -97,7 +82,7 @@ mod tests {
 
     #[test]
     fn missing_data_dir_yields_empty_map() {
-        let dir = tempdir();
+        let dir = tempdir("sitedata");
         let config = config_in(&dir);
         let data = load_data(&config).unwrap();
         assert!(data.is_empty());
@@ -106,7 +91,7 @@ mod tests {
 
     #[test]
     fn yaml_file_loaded_at_stem() {
-        let dir = tempdir();
+        let dir = tempdir("sitedata");
         write(&dir.join("data/menu.yaml"), "items: [a, b]\n");
         let config = config_in(&dir);
         let data = load_data(&config).unwrap();
@@ -122,7 +107,7 @@ mod tests {
 
     #[test]
     fn both_yaml_and_yml_extensions_load() {
-        let dir = tempdir();
+        let dir = tempdir("sitedata");
         write(&dir.join("data/a.yaml"), "x: 1\n");
         write(&dir.join("data/b.yml"), "y: 2\n");
         let config = config_in(&dir);
@@ -134,7 +119,7 @@ mod tests {
 
     #[test]
     fn non_yaml_files_are_ignored() {
-        let dir = tempdir();
+        let dir = tempdir("sitedata");
         write(&dir.join("data/notes.txt"), "ignore me\n");
         write(&dir.join("data/keep.yaml"), "k: v\n");
         let config = config_in(&dir);
@@ -146,7 +131,7 @@ mod tests {
 
     #[test]
     fn subdirectories_are_skipped() {
-        let dir = tempdir();
+        let dir = tempdir("sitedata");
         write(&dir.join("data/nested/inner.yaml"), "x: 1\n");
         write(&dir.join("data/top.yaml"), "y: 2\n");
         let config = config_in(&dir);

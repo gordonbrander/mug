@@ -46,19 +46,7 @@ fn copy_tree(root: &Path, output_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn tempdir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let dir =
-            std::env::temp_dir().join(format!("mug-static-{}-{}", std::process::id(), nanos));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::test_util::{cleanup, tempdir};
 
     fn write(path: &Path, body: &str) {
         if let Some(parent) = path.parent() {
@@ -67,13 +55,9 @@ mod tests {
         fs::write(path, body).unwrap();
     }
 
-    fn cleanup(dir: &Path) {
-        let _ = fs::remove_dir_all(dir);
-    }
-
     #[test]
     fn site_static_overlays_theme_static() {
-        let base = tempdir();
+        let base = tempdir("static");
         let theme = base.join("theme");
         let site_static = base.join("static");
         let out = base.join("public");
@@ -98,7 +82,7 @@ mod tests {
 
     #[test]
     fn missing_roots_are_noops() {
-        let base = tempdir();
+        let base = tempdir("static");
         let config = Config {
             static_dir: base.join("nope"),
             theme: Some(base.join("also-nope")),

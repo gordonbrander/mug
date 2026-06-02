@@ -11,6 +11,8 @@ pub mod query;
 pub mod site_data;
 pub mod taxonomy;
 pub mod tera_env;
+#[cfg(test)]
+mod test_util;
 
 use anyhow::Result;
 use std::net::IpAddr;

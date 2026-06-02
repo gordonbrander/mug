@@ -19,7 +19,7 @@ mod text;
 mod url;
 
 use crate::build::markup::wikilink::build_stem_index;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::doc::DocMeta;
 use crate::doc_index::DocIndex;
 use anyhow::{Context, Result};
@@ -28,7 +28,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use tera::Tera;
-use walkdir::WalkDir;
 
 /// Process-wide syntect adapter. Loading the default syntax + theme sets is
 /// non-trivial, so build it once and share it across every markup env (and
@@ -80,7 +79,7 @@ fn markup_options() -> comrak::Options<'static> {
 /// index-listing filters/functions (`query`, `backlinks`) are registered here,
 /// because the index is not yet meaningful at body-render time (spec §11).
 pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<MarkupEnv> {
-    let mut tera = load_templates(config)?;
+    let (mut tera, template_names) = load_templates(config)?;
     // Build the stem index before `docs` is moved into the URL filters.
     let stem_index = build_stem_index(&docs);
     let options = markup_options();
@@ -93,7 +92,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     text::register(&mut tera);
     entries::register(&mut tera);
     markdown::register(&mut tera, options.clone(), SYNTECT.clone());
-    let macro_preamble = macros::discover_imports(config);
+    let macro_preamble = macros::macro_preamble(&template_names);
     Ok(MarkupEnv {
         tera,
         macro_preamble,
@@ -109,7 +108,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
 /// template phase (with collections and taxonomies already defined) — every
 /// adapter shares the same `Arc`, so there is no per-function clone of the docs.
 pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera> {
-    let mut env = load_templates(config)?;
+    let (mut env, _template_names) = load_templates(config)?;
     collection::register(&mut env, index.clone());
     doc::register(&mut env, index.clone());
     taxonomy::register(&mut env, index.clone());
@@ -131,49 +130,38 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
 /// Build the Tera env by overlaying every `config.template_roots()` in order:
 /// the theme's `templates/` first, the site's last, so a site template overrides
 /// a theme template of the same name. Each `.html`/`.xml` file is registered
-/// under its path relative to its root (`post.html`, `macros/youtube.html`), the
-/// same names Tera's glob produced — so `{% extends "base.html" %}` resolves to
-/// the site's `base.html` when the site overrides it. With no template files at
-/// all (zero-config sites, fixtures 01/02) this yields an empty `Tera`.
-fn load_templates(config: &Config) -> Result<Tera> {
-    // (name, path) pairs in overlay order; a later root's file replaces an
-    // earlier one's under the same name (site wins). Same shape as `merge_named`
-    // in config.rs — avoids pulling in an ordered-map crate.
-    let mut files: Vec<(String, PathBuf)> = Vec::new();
-    for root in config.template_roots() {
-        if !root.exists() {
-            continue;
-        }
-        for entry in WalkDir::new(&root) {
-            let entry = entry.with_context(|| format!("walking {}", root.display()))?;
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
-            let ext = path.extension().and_then(|s| s.to_str());
-            if !matches!(ext, Some("html") | Some("xml")) {
-                continue;
-            }
-            let rel = path
-                .strip_prefix(&root)
-                .expect("walkdir entry is always under the root we passed in");
-            let name = rel_template_name(rel);
-            if let Some(slot) = files.iter_mut().find(|(n, _)| *n == name) {
-                slot.1 = path.to_path_buf();
-            } else {
-                files.push((name, path.to_path_buf()));
-            }
-        }
-    }
+/// under its path relative to its root (`post.html`, `macros/youtube.html`) — so
+/// `{% extends "base.html" %}` resolves to the site's `base.html` when the site
+/// overrides it. Returns the `Tera` env alongside the registered template names
+/// (in overlay order, site-wins-deduped) so the markup env can derive its macro
+/// preamble from the same set (see [`macros::macro_preamble`]). With no template
+/// files at all (zero-config sites, fixtures 01/02) this yields an empty `Tera`.
+fn load_templates(config: &Config) -> Result<(Tera, Vec<String>)> {
+    // `overlay_files` walks the roots and dedups per relative path (site wins);
+    // map each surviving file to its `/`-joined Tera name, paired with its path.
+    let files: Vec<(String, PathBuf)> =
+        config::overlay_files(&config.template_roots(), is_html_or_xml)?
+            .into_iter()
+            .map(|(rel, path)| (rel_template_name(&rel), path))
+            .collect();
     if files.is_empty() {
-        return Ok(Tera::default());
+        return Ok((Tera::default(), Vec::new()));
     }
     let mut tera = Tera::default();
     let pairs: Vec<(PathBuf, Option<&str>)> =
         files.iter().map(|(name, path)| (path.clone(), Some(name.as_str()))).collect();
     tera.add_template_files(pairs)
         .context("loading templates")?;
-    Ok(tera)
+    let names = files.into_iter().map(|(name, _)| name).collect();
+    Ok((tera, names))
+}
+
+/// Whether `path` is a template file Tera should load (`.html`/`.xml`).
+fn is_html_or_xml(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(|s| s.to_str()),
+        Some("html") | Some("xml")
+    )
 }
 
 /// A template's Tera name: its path relative to its root, joined with `/` on

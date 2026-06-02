@@ -40,7 +40,7 @@ pub fn run(host: IpAddr, port: u16) -> Result<()> {
     // watch-driven rebuilds below).
     crate::build::run(true).context("initial build")?;
 
-    let (config, _) = Config::load(Path::new("config.yaml"))?;
+    let (config, _) = Config::load_with_theme(Path::new("config.yaml"))?;
     let output_dir = config.output_dir.clone();
 
     let runtime = tokio::runtime::Builder::new_current_thread()

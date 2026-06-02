@@ -79,27 +79,11 @@ pub fn run(target: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    fn tempdir(name: &str) -> PathBuf {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!(
-            "mug-scaffold-{}-{}-{}",
-            name,
-            std::process::id(),
-            nanos
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
+    use crate::test_util::temp_path;
 
     #[test]
     fn errors_when_target_exists() {
-        let dir = tempdir("exists");
+        let dir = temp_path("exists");
         fs::create_dir_all(&dir).unwrap();
         let err = run(&dir).unwrap_err();
         assert!(err.to_string().contains("already exists"));
@@ -108,7 +92,7 @@ mod tests {
 
     #[test]
     fn writes_all_scaffold_files() {
-        let dir = tempdir("writes");
+        let dir = temp_path("writes");
         run(&dir).unwrap();
         for (rel, _) in SCAFFOLD_FILES {
             let path = dir.join(rel);
@@ -120,7 +104,7 @@ mod tests {
     #[test]
     fn creates_nested_parent_dirs() {
         // content/posts/hello.md requires nested-dir creation.
-        let dir = tempdir("nested");
+        let dir = temp_path("nested");
         run(&dir).unwrap();
         assert!(dir.join("content/posts/hello.md").exists());
         assert!(dir.join("templates/base.html").exists());
