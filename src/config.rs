@@ -16,13 +16,16 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub archives_dir: PathBuf,
     /// Path to a theme folder (relative to the working directory), from the
-    /// top-level `theme:` key. When set, templates and archives are read from
-    /// the theme (the site's own `templates/` / `archives/` are not consulted),
-    /// the theme's `config.yaml` supplies config defaults the site overrides,
-    /// and the theme's `static/` is overlaid beneath the site's. `data`,
-    /// `content`, and `output` stay site-only. A theme without a `config.yaml`
-    /// still contributes files via the conventional subdir names. Themes are not
-    /// nested: a `theme:` key inside a theme's own `config.yaml` is ignored.
+    /// top-level `theme:` key. When set, the theme's `templates/`, `archives/`,
+    /// and `static/` are overlaid *beneath* the site's: the site's own files win
+    /// per-path, but anything the site doesn't provide falls through to the
+    /// theme (see [`template_roots`](Self::template_roots),
+    /// [`archive_roots`](Self::archive_roots), [`static_roots`](Self::static_roots)).
+    /// The theme's `config.yaml` supplies config defaults the site overrides.
+    /// `data`, `content`, and `output` stay site-only. A theme without a
+    /// `config.yaml` still contributes files via the conventional subdir names.
+    /// Themes are not nested (one level, no child themes): a `theme:` key inside
+    /// a theme's own `config.yaml` is ignored.
     pub theme: Option<PathBuf>,
     /// When set, the markup phase scans Markdown bodies for inline `#hashtag`s,
     /// adds them to each doc's `tags`, and strips them from the rendered HTML.
@@ -98,7 +101,7 @@ impl Config {
             let theme_config_path = theme_dir.join("config.yaml");
             let (theme_config, theme_site) = Self::load_one(&theme_config_path)
                 .with_context(|| format!("loading theme at {}", theme_dir.display()))?;
-            config.apply_theme(&mut site, theme_config, theme_site, &theme_dir);
+            config.apply_theme(&mut site, theme_config, theme_site);
         }
         // Validate after merge: a site's `defaults:` may name a collection the
         // theme declares, so the check runs against the merged collection set.
@@ -167,24 +170,24 @@ impl Config {
         Ok((config, site))
     }
 
-    /// Layer a loaded theme beneath this (site) config. Templates and archives
-    /// are taken from the theme (theme dir only); the theme's `static/` is
-    /// recorded for the overlay; collections/defaults merge by name and
-    /// taxonomies by value with the site winning; the `site:` map is deep-merged
-    /// with the site winning. `content`/`output`/`data` dirs are left untouched.
+    /// Layer a loaded theme beneath this (site) config. The theme's
+    /// `templates/`/`archives/`/`static/` overlay beneath the site's (derived on
+    /// demand by the `*_roots` helpers — `theme_dir` itself is recorded in
+    /// `self.theme`); collections/defaults merge by name and taxonomies by value
+    /// with the site winning; the `site:` map is deep-merged with the site
+    /// winning. The site's own `*_dir` paths are left untouched, as are
+    /// `content`/`output`/`data`.
     fn apply_theme(
         &mut self,
         site: &mut Mapping,
         theme: Config,
         theme_site: Mapping,
-        theme_dir: &Path,
     ) {
-        // Templates & archives come from the theme (theme dir only). A theme
-        // always uses the conventional `templates/`/`archives/`/`static/` subdir
-        // names relative to its root — its own `*_dir` config keys do not apply.
-        // (The `static/` root is derived on demand in `static_roots`.)
-        self.templates_dir = theme_dir.join("templates");
-        self.archives_dir = theme_dir.join("archives");
+        // Templates, archives, and static overlay beneath the site via the
+        // `*_roots` helpers, which derive the theme's conventional
+        // `templates/`/`archives/`/`static/` subdirs from `self.theme`. A theme's
+        // own `*_dir` config keys do not apply. The site's `*_dir` fields keep
+        // their site values so the site layer still resolves.
         // Collections & defaults: theme entries first, site overrides by name or
         // appends. Taxonomies: theme then site, dedup preserving order.
         self.collections = merge_named(theme.collections, std::mem::take(&mut self.collections));
@@ -214,24 +217,50 @@ impl Config {
             .unwrap_or_default();
     }
 
-    /// The theme's `static/` directory, if a theme is configured. Derived from
-    /// `theme` (always the conventional `static/` subdir); the single place that
-    /// knowledge lives.
-    pub fn theme_static(&self) -> Option<PathBuf> {
-        self.theme.as_ref().map(|theme| theme.join("static"))
+    /// The theme's conventional `<name>/` subdir, if a theme is configured.
+    /// Themes always use the conventional subdir name regardless of their own
+    /// `*_dir` config keys; this is the single place that knowledge lives.
+    fn theme_subdir(&self, name: &str) -> Option<PathBuf> {
+        self.theme.as_ref().map(|theme| theme.join(name))
     }
 
-    /// Ordered `static/` source roots: the theme's `static/` (if a theme is
-    /// configured) followed by the site's `static_dir`. The static-copy phase
-    /// walks them in order so the site overlays the theme. With no theme this is
-    /// just `static_dir`.
-    pub fn static_roots(&self) -> Vec<PathBuf> {
+    /// Ordered overlay roots for an asset class: the theme's conventional subdir
+    /// (if a theme is configured) followed by the site's own dir. Consumers walk
+    /// them in order so the site overlays the theme on path collisions. With no
+    /// theme this is just the site dir.
+    fn overlay_roots(&self, theme_sub: &str, site_dir: &Path) -> Vec<PathBuf> {
         let mut roots = Vec::new();
-        if let Some(theme_static) = self.theme_static() {
-            roots.push(theme_static);
+        if let Some(theme_root) = self.theme_subdir(theme_sub) {
+            roots.push(theme_root);
         }
-        roots.push(self.static_dir.clone());
+        roots.push(site_dir.to_path_buf());
         roots
+    }
+
+    /// The theme's `static/` directory, if a theme is configured.
+    pub fn theme_static(&self) -> Option<PathBuf> {
+        self.theme_subdir("static")
+    }
+
+    /// Ordered `static/` source roots (theme then site). The static-copy phase
+    /// walks them so the site overlays the theme. With no theme this is just
+    /// `static_dir`.
+    pub fn static_roots(&self) -> Vec<PathBuf> {
+        self.overlay_roots("static", &self.static_dir)
+    }
+
+    /// Ordered `templates/` roots (theme then site). The Tera loader walks them
+    /// so a site template overrides a theme template of the same name. With no
+    /// theme this is just `templates_dir`.
+    pub fn template_roots(&self) -> Vec<PathBuf> {
+        self.overlay_roots("templates", &self.templates_dir)
+    }
+
+    /// Ordered `archives/` roots (theme then site). The archive phase walks them
+    /// so a site archive overrides a theme archive of the same name. With no
+    /// theme this is just `archives_dir`.
+    pub fn archive_roots(&self) -> Vec<PathBuf> {
+        self.overlay_roots("archives", &self.archives_dir)
     }
 }
 
@@ -564,14 +593,24 @@ mod tests {
     }
 
     #[test]
-    fn theme_sets_templates_and_archives_and_static_dirs() {
+    fn theme_overlays_templates_archives_and_static_roots() {
         let dir = tempdir();
         let theme = dir.join("themes/demo");
         write_config_in(&theme, "site:\n  title: Demo\n");
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
         let (config, _) = Config::load(&path).unwrap();
-        assert_eq!(config.templates_dir, theme.join("templates"));
-        assert_eq!(config.archives_dir, theme.join("archives"));
+        // Site dirs keep their site values; the theme is overlaid beneath via the
+        // `*_roots` helpers (theme first, site last — site wins).
+        assert_eq!(config.templates_dir, PathBuf::from("templates"));
+        assert_eq!(config.archives_dir, PathBuf::from("archives"));
+        assert_eq!(
+            config.template_roots(),
+            vec![theme.join("templates"), PathBuf::from("templates")]
+        );
+        assert_eq!(
+            config.archive_roots(),
+            vec![theme.join("archives"), PathBuf::from("archives")]
+        );
         assert_eq!(config.theme_static(), Some(theme.join("static")));
         // content/output/data stay site-only.
         assert_eq!(config.content_dir, PathBuf::from("content"));
@@ -584,13 +623,13 @@ mod tests {
     fn theme_ignores_its_own_dir_names() {
         let dir = tempdir();
         let theme = dir.join("theme");
-        // A theme always uses the conventional subdir names regardless of any
+        // A theme always contributes its conventional subdirs regardless of any
         // `*_dir` keys in its own config.yaml.
         write_config_in(&theme, "templates_dir: layouts\narchives_dir: views\nstatic_dir: assets\n");
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
         let (config, _) = Config::load(&path).unwrap();
-        assert_eq!(config.templates_dir, theme.join("templates"));
-        assert_eq!(config.archives_dir, theme.join("archives"));
+        assert_eq!(config.template_roots()[0], theme.join("templates"));
+        assert_eq!(config.archive_roots()[0], theme.join("archives"));
         assert_eq!(config.theme_static(), Some(theme.join("static")));
         cleanup(&dir);
     }
@@ -602,10 +641,17 @@ mod tests {
         fs::create_dir_all(&theme).unwrap(); // no config.yaml inside
         let path = write_config(&dir, &format!("theme: {}\n", theme.display()));
         let (config, _) = Config::load(&path).unwrap();
-        assert_eq!(config.templates_dir, theme.join("templates"));
-        assert_eq!(config.archives_dir, theme.join("archives"));
+        assert_eq!(config.template_roots()[0], theme.join("templates"));
+        assert_eq!(config.archive_roots()[0], theme.join("archives"));
         assert_eq!(config.theme_static(), Some(theme.join("static")));
         cleanup(&dir);
+    }
+
+    #[test]
+    fn template_and_archive_roots_are_just_site_without_theme() {
+        let config = Config::default();
+        assert_eq!(config.template_roots(), vec![PathBuf::from("templates")]);
+        assert_eq!(config.archive_roots(), vec![PathBuf::from("archives")]);
     }
 
     #[test]

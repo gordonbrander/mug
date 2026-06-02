@@ -7,7 +7,7 @@
 use crate::config::Config;
 use anyhow::Result;
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -36,26 +36,17 @@ where
     let (tx, rx) = mpsc::channel();
     let mut debouncer = new_debouncer(DEBOUNCE, tx)?;
 
-    let dirs = [
-        &config.content_dir,
-        &config.templates_dir,
-        &config.archives_dir,
-        &config.data_dir,
-        &config.static_dir,
-    ];
-    for dir in dirs {
+    // Watch both overlay layers: the `*_roots` helpers expand to the theme's
+    // subdir (when configured) and the site's, so a change to either a theme file
+    // or a site override triggers a rebuild. Content and data stay site-only.
+    let mut dirs: Vec<PathBuf> = vec![config.content_dir.clone(), config.data_dir.clone()];
+    dirs.extend(config.template_roots());
+    dirs.extend(config.archive_roots());
+    dirs.extend(config.static_roots());
+    for dir in &dirs {
         if dir.exists() {
             debouncer.watcher().watch(dir, RecursiveMode::Recursive)?;
         }
-    }
-    // `templates_dir`/`archives_dir` already point into the theme when one is
-    // configured; the theme's `static/` is separate, so watch it too.
-    if let Some(theme_static) = config.theme_static()
-        && theme_static.exists()
-    {
-        debouncer
-            .watcher()
-            .watch(&theme_static, RecursiveMode::Recursive)?;
     }
     let config_path = Path::new("config.yaml");
     if config_path.exists() {

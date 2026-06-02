@@ -25,8 +25,10 @@ use crate::doc_index::DocIndex;
 use anyhow::{Context, Result};
 use comrak::plugins::syntect::{SyntectAdapter, SyntectAdapterBuilder};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use tera::Tera;
+use walkdir::WalkDir;
 
 /// Process-wide syntect adapter. Loading the default syntax + theme sets is
 /// non-trivial, so build it once and share it across every markup env (and
@@ -126,12 +128,62 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
     Ok(env)
 }
 
+/// Build the Tera env by overlaying every `config.template_roots()` in order:
+/// the theme's `templates/` first, the site's last, so a site template overrides
+/// a theme template of the same name. Each `.html`/`.xml` file is registered
+/// under its path relative to its root (`post.html`, `macros/youtube.html`), the
+/// same names Tera's glob produced — so `{% extends "base.html" %}` resolves to
+/// the site's `base.html` when the site overrides it. With no template files at
+/// all (zero-config sites, fixtures 01/02) this yields an empty `Tera`.
 fn load_templates(config: &Config) -> Result<Tera> {
-    if !config.templates_dir.exists() {
+    // (name, path) pairs in overlay order; a later root's file replaces an
+    // earlier one's under the same name (site wins). Same shape as `merge_named`
+    // in config.rs — avoids pulling in an ordered-map crate.
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    for root in config.template_roots() {
+        if !root.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(&root) {
+            let entry = entry.with_context(|| format!("walking {}", root.display()))?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let ext = path.extension().and_then(|s| s.to_str());
+            if !matches!(ext, Some("html") | Some("xml")) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&root)
+                .expect("walkdir entry is always under the root we passed in");
+            let name = rel_template_name(rel);
+            if let Some(slot) = files.iter_mut().find(|(n, _)| *n == name) {
+                slot.1 = path.to_path_buf();
+            } else {
+                files.push((name, path.to_path_buf()));
+            }
+        }
+    }
+    if files.is_empty() {
         return Ok(Tera::default());
     }
-    let pattern = format!("{}/**/*.{{html,xml}}", config.templates_dir.display());
-    Tera::new(&pattern).with_context(|| format!("loading templates from {}", pattern))
+    let mut tera = Tera::default();
+    let pairs: Vec<(PathBuf, Option<&str>)> =
+        files.iter().map(|(name, path)| (path.clone(), Some(name.as_str()))).collect();
+    tera.add_template_files(pairs)
+        .context("loading templates")?;
+    Ok(tera)
+}
+
+/// A template's Tera name: its path relative to its root, joined with `/` on
+/// every platform (not the OS separator) so theme/site names match cross-platform
+/// and line up with `macros/<stem>.html` references in the macro preamble.
+fn rel_template_name(rel: &std::path::Path) -> String {
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 #[cfg(test)]
@@ -579,6 +631,95 @@ mod tests {
             env.macro_preamble,
             "{% import \"macros/real.html\" as real %}\n"
         );
+    }
+
+    /// RAII temp dir holding a `theme/` and `site/` next to each other, wired into
+    /// a `Config` whose theme overlays its `templates/` beneath the site's. Used
+    /// to exercise the template/macro overlay (site wins per-path).
+    struct TempOverlay(PathBuf);
+    impl TempOverlay {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("mug-tera_env-overlay-{}-{}", name, std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+        /// Write `templates/<rel>` under the theme (`layer = "theme"`) or the site
+        /// (`layer = "site"`).
+        fn write_template(&self, layer: &str, rel: &str, body: &str) {
+            let path = self.0.join(layer).join("templates").join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        fn cfg(&self) -> Config {
+            Config {
+                templates_dir: self.0.join("site").join("templates"),
+                theme: Some(self.0.join("theme")),
+                ..Config::default()
+            }
+        }
+    }
+    impl Drop for TempOverlay {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn site_template_overrides_theme_template_of_same_name() {
+        let o = TempOverlay::new("override");
+        o.write_template("theme", "base.html", "THEME");
+        o.write_template("site", "base.html", "SITE");
+        let mut env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let out = env
+            .render_str("{% include \"base.html\" %}", &tera::Context::new())
+            .unwrap();
+        assert_eq!(out, "SITE");
+    }
+
+    #[test]
+    fn theme_only_template_falls_through_when_site_lacks_it() {
+        let o = TempOverlay::new("fallthrough");
+        // Site overrides base.html but provides no post.html; the theme's
+        // post.html still loads and extends the *site's* base.html.
+        o.write_template("theme", "base.html", "[THEME {% block body %}{% endblock %}]");
+        o.write_template("site", "base.html", "[SITE {% block body %}{% endblock %}]");
+        o.write_template(
+            "theme",
+            "post.html",
+            "{% extends \"base.html\" %}{% block body %}hi{% endblock %}",
+        );
+        let env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let out = env
+            .render("post.html", &tera::Context::new())
+            .unwrap();
+        // Theme's post.html rendered, wrapped by the site's overriding base.html.
+        assert_eq!(out, "[SITE hi]");
+    }
+
+    #[test]
+    fn site_macro_overrides_theme_macro_of_same_stem() {
+        let o = TempOverlay::new("macro-override");
+        o.write_template(
+            "theme",
+            "macros/note.html",
+            "{% macro show() %}THEME{% endmacro show %}",
+        );
+        o.write_template(
+            "site",
+            "macros/note.html",
+            "{% macro show() %}SITE{% endmacro show %}",
+        );
+        let mut env = build_markup_env(&o.cfg(), empty_meta_snapshot()).unwrap();
+        // One import for the single stem, even though both layers define it.
+        assert_eq!(
+            env.macro_preamble,
+            "{% import \"macros/note.html\" as note %}\n"
+        );
+        let body = format!("{}{{{{ note::show() }}}}", env.macro_preamble);
+        let out = env.tera.render_str(&body, &tera::Context::new()).unwrap();
+        assert_eq!(out, "SITE");
     }
 
     #[test]

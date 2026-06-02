@@ -144,29 +144,41 @@ pub fn run(
     site_data: &SiteData,
     classification: &Arc<DocIndex>,
 ) -> Result<Vec<Doc>> {
-    if !config.archives_dir.exists() {
-        return Ok(Vec::new());
+    // Walk the archive roots in overlay order (theme then site). A site archive
+    // with the same `id_path` as a theme archive replaces it, so the site wins —
+    // the same per-path override the templates and static layers give.
+    let mut archives: Vec<Archive> = Vec::new();
+    for root in config.archive_roots() {
+        if !root.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(&root) {
+            let entry = entry.with_context(|| format!("walking {}", root.display()))?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let id_path = path
+                .strip_prefix(&root)
+                .with_context(|| format!("stripping prefix from {}", path.display()))?
+                .to_path_buf();
+            let source =
+                fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+            let a = Archive::parse(id_path.clone(), &source)
+                .with_context(|| format!("parsing archive {}", path.display()))?;
+            if let Some(slot) = archives.iter_mut().find(|x| x.id_path == id_path) {
+                *slot = a;
+            } else {
+                archives.push(a);
+            }
+        }
     }
 
-    let mut archives: Vec<Archive> = Vec::new();
-    for entry in WalkDir::new(&config.archives_dir) {
-        let entry = entry.with_context(|| format!("walking {}", config.archives_dir.display()))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if entry.file_name().to_string_lossy().starts_with('.') {
-            continue;
-        }
-        let path = entry.path();
-        let id_path = path
-            .strip_prefix(&config.archives_dir)
-            .with_context(|| format!("stripping prefix from {}", path.display()))?
-            .to_path_buf();
-        let source =
-            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let a = Archive::parse(id_path, &source)
-            .with_context(|| format!("parsing archive {}", path.display()))?;
-        archives.push(a);
+    if archives.is_empty() {
+        return Ok(Vec::new());
     }
 
     // Frozen `DocMeta` view of the source docs (post-markup) for wikilink
@@ -370,5 +382,78 @@ mod tests {
     fn parse_taxonomy_kind_requires_taxonomy_name() {
         let source = "---\nkind: taxonomy\npermalink: /tags/:term/\n---\nBODY";
         assert!(Archive::parse(PathBuf::from("x.html"), source).is_err());
+    }
+
+    fn tempdir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir()
+            .join(format!("mug-archive-{}-{}-{}", name, std::process::id(), nanos));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_archive(base: &std::path::Path, layer: &str, rel: &str, body: &str) {
+        let path = base.join(layer).join("archives").join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn site_archive_overrides_theme_archive_of_same_name() {
+        let base = tempdir("overlay");
+        // Both layers define archives/blog.html over the (empty) `posts`
+        // collection, with distinct permalinks so the winner is identifiable.
+        write_archive(
+            &base,
+            "theme",
+            "blog.html",
+            "---\nkind: collection\ncollection: posts\npermalink: /theme-blog/\n---\nBODY",
+        );
+        write_archive(
+            &base,
+            "site",
+            "blog.html",
+            "---\nkind: collection\ncollection: posts\npermalink: /site-blog/\n---\nBODY",
+        );
+        let config = Config {
+            archives_dir: base.join("site").join("archives"),
+            theme: Some(base.join("theme")),
+            // No templates dir → empty Tera markup env, fine for a body of "BODY".
+            templates_dir: base.join("none"),
+            ..Config::default()
+        };
+        let site_data = SiteData { site: Mapping::new(), data: Mapping::new() };
+        let classification = Arc::new(DocIndex::new());
+        let pages = run(&config, &site_data, &classification).unwrap();
+        // Site's blog.html shadows the theme's: one page, at the site permalink.
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].output_path, PathBuf::from("site-blog/index.html"));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn theme_only_archive_is_produced() {
+        let base = tempdir("theme-only");
+        write_archive(
+            &base,
+            "theme",
+            "blog.html",
+            "---\nkind: collection\ncollection: posts\npermalink: /blog/\n---\nBODY",
+        );
+        let config = Config {
+            archives_dir: base.join("site").join("archives"), // does not exist
+            theme: Some(base.join("theme")),
+            templates_dir: base.join("none"),
+            ..Config::default()
+        };
+        let site_data = SiteData { site: Mapping::new(), data: Mapping::new() };
+        let classification = Arc::new(DocIndex::new());
+        let pages = run(&config, &site_data, &classification).unwrap();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].output_path, PathBuf::from("blog/index.html"));
+        let _ = fs::remove_dir_all(&base);
     }
 }
