@@ -1,9 +1,14 @@
 # Static Site Generator — Design Spec
 
+The static site generator for creatives.
+
 A minimal, convention-light static site generator written in **Rust**. The
 guiding principle is that *all* customization lives in **config, frontmatter,
 and templates** — never in code or scripts. The CLI is opinionated, has
 sensible defaults, and needs zero config to do something useful.
+
+Audience: artists and creatives.
+Unique features: digital gardens and portfolios.
 
 ---
 

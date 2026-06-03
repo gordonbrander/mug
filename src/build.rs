@@ -36,13 +36,18 @@ pub mod template;
 pub mod write;
 
 use crate::config::Config;
+use crate::report::BuildReport;
 use crate::site_data::SiteData;
 use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
 
-pub fn run(include_drafts: bool) -> Result<()> {
-    let (config, site) = Config::load_with_theme(Path::new("config.yaml"))?;
+/// Run the full build pipeline for the project rooted at `root`, returning a
+/// [`BuildReport`] (currently just the number of output files written). Reporting
+/// of timing/status is left to callers ([`crate::watch`]/[`crate::serve`] and the
+/// CLI/GUI front-ends) so this stays a pure produce-and-return function.
+pub fn run(root: &Path, include_drafts: bool) -> Result<BuildReport> {
+    let (config, site) = Config::load_with_theme(root)?;
     let site_data = SiteData::load(&config, site)?;
     let mut index = read::run(&config, include_drafts)?;
     // Collections classify from frontmatter (pre-markup).
@@ -60,5 +65,7 @@ pub fn run(include_drafts: bool) -> Result<()> {
     let outputs = template::run(&config, &site_data, &index, archive_docs)?;
     write::run(&config, &outputs)?;
     static_copy::run(&config)?;
-    Ok(())
+    Ok(BuildReport {
+        pages: outputs.len(),
+    })
 }

@@ -28,6 +28,9 @@ use tower::ServiceExt;
 use tower_http::services::ServeDir;
 
 use crate::config::Config;
+use crate::report::{Progress, Reporter, ServeHandle};
+use std::sync::Arc;
+use std::time::Instant;
 
 const LIVERELOAD_JS: &str =
     "new EventSource('/__livereload').onmessage = () => location.reload();\n";
@@ -35,12 +38,23 @@ const LIVERELOAD_TAG: &str = "<script src=\"/__livereload.js\"></script>";
 
 type ServeBody = UnsyncBoxBody<Bytes, io::Error>;
 
-pub fn run(host: IpAddr, port: u16) -> Result<()> {
+pub fn run(
+    root: &Path,
+    host: IpAddr,
+    port: u16,
+    reporter: Arc<dyn Reporter>,
+    handle: ServeHandle,
+) -> Result<()> {
     // serve is the local preview, so drafts are included (here and in the
     // watch-driven rebuilds below).
-    crate::build::run(true).context("initial build")?;
+    let start = Instant::now();
+    let report = crate::build::run(root, true).context("initial build")?;
+    reporter.report(Progress::BuildOk {
+        pages: report.pages,
+        elapsed: start.elapsed(),
+    });
 
-    let (config, _) = Config::load_with_theme(Path::new("config.yaml"))?;
+    let (config, _) = Config::load_with_theme(root)?;
     let output_dir = config.output_dir.clone();
 
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -50,21 +64,38 @@ pub fn run(host: IpAddr, port: u16) -> Result<()> {
 
     let (reload_tx, _) = broadcast::channel::<()>(16);
 
+    // Watcher thread: it must be `'static`, so it owns its own root/reporter and a
+    // clone of the shutdown flag (which `handle.stop()` flips so this loop exits).
     let reload_tx_watcher = reload_tx.clone();
-    std::thread::spawn(move || {
+    let watch_reporter = reporter.clone();
+    let watch_running = handle.running();
+    let watch_root = root.to_path_buf();
+    let watcher = std::thread::spawn(move || {
         // serve already built the site before binding (above); watch_loop is
         // purely the loop and does no initial build, so the site is built once.
-        let result = crate::command::watch::watch_loop(|build_result| {
-            if build_result.is_ok() {
-                let _ = reload_tx_watcher.send(());
-            }
-        });
+        let result = crate::command::watch::watch_loop(
+            &watch_root,
+            watch_reporter.as_ref(),
+            &watch_running,
+            |build_result| {
+                if build_result.is_ok() {
+                    let _ = reload_tx_watcher.send(());
+                }
+            },
+        );
         if let Err(e) = result {
-            eprintln!("watcher error: {e:#}");
+            watch_reporter.report(Progress::Info(format!("watcher error: {e:#}")));
         }
     });
 
-    runtime.block_on(serve(host, port, output_dir, reload_tx))
+    let result = runtime.block_on(serve(host, port, output_dir, reload_tx, &reporter, &handle));
+
+    // Wind the watcher thread down (it polls the running flag) and join it before
+    // returning, whether we stopped cleanly or the accept loop errored.
+    handle.stop();
+    let _ = watcher.join();
+    reporter.report(Progress::ServeStopped);
+    result
 }
 
 async fn serve(
@@ -72,34 +103,51 @@ async fn serve(
     port: u16,
     output_dir: PathBuf,
     reload_tx: broadcast::Sender<()>,
+    reporter: &Arc<dyn Reporter>,
+    handle: &ServeHandle,
 ) -> Result<()> {
     let addr = SocketAddr::new(host, port);
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
-    eprintln!("serving http://{addr}");
+    reporter.report(Progress::ServeReady(addr));
 
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let io = TokioIo::new(stream);
-        let output_dir = output_dir.clone();
-        let reload_tx = reload_tx.clone();
-        tokio::spawn(async move {
-            let service = service_fn(move |req: Request<Incoming>| {
-                let output_dir = output_dir.clone();
-                let reload_tx = reload_tx.clone();
-                async move { handle(req, output_dir, reload_tx).await }
+    // Run the accept loop as a background task and block this future on the stop
+    // signal instead of racing them with `select!` (which would require tokio's
+    // `macros` feature). When `stop()` fires, `notified()` resolves, we return,
+    // `block_on` unwinds, and the dropped runtime cancels the accept task.
+    tokio::spawn(async move {
+        loop {
+            // A fatal accept error ends the loop; a dev server has nothing useful
+            // to do but stop accepting (the process/handle still controls exit).
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let io = TokioIo::new(stream);
+            let output_dir = output_dir.clone();
+            let reload_tx = reload_tx.clone();
+            tokio::spawn(async move {
+                let service = service_fn(move |req: Request<Incoming>| {
+                    let output_dir = output_dir.clone();
+                    let reload_tx = reload_tx.clone();
+                    async move { handle_request(req, output_dir, reload_tx).await }
+                });
+                // Connection errors (most commonly: client closed an SSE stream)
+                // aren't actionable in a dev server, so we don't log them.
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(io, service)
+                    .await;
             });
-            // Connection errors (most commonly: client closed an SSE stream)
-            // aren't actionable in a dev server, so we don't log them.
-            let _ = hyper::server::conn::http1::Builder::new()
-                .serve_connection(io, service)
-                .await;
-        });
-    }
+        }
+    });
+
+    // `stop()` uses `notify_one`, which latches a permit, so a stop that races
+    // ahead of this await still wakes us.
+    handle.shutdown_notify().notified().await;
+    Ok(())
 }
 
-async fn handle(
+async fn handle_request(
     req: Request<Incoming>,
     output_dir: PathBuf,
     reload_tx: broadcast::Sender<()>,

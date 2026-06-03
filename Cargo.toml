@@ -2,6 +2,10 @@
 name = "mug"
 version = "0.1.0"
 edition = "2024"
+# Don't auto-discover `src/bin/*.rs` as binaries: the GUI there must stay gated
+# behind the `gui` feature (declared explicitly below). The default `mug` binary
+# from `src/main.rs` is unaffected by this.
+autobins = false
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -24,6 +28,9 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs"] }
 http-body-util = "0.1"
 bytes = "1"
+eframe = { version = "0.34.3", optional = true }
+rfd = { version = "0.17.2", optional = true }
+opener = { version = "0.8.4", optional = true }
 
 [dev-dependencies]
 insta = "1"
@@ -31,3 +38,15 @@ insta = "1"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+[features]
+# Native desktop launcher (`mug-gui`). Off by default so the CLI build stays lean
+# and free of the egui/winit/wgpu dependency tree.
+gui = ["dep:eframe", "dep:rfd", "dep:opener"]
+
+# The default CLI binary is `src/main.rs` (auto-detected). The GUI is a separate
+# binary gated behind the `gui` feature.
+[[bin]]
+name = "mug-gui"
+path = "src/bin/gui.rs"
+required-features = ["gui"]

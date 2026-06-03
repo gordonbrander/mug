@@ -1,20 +1,22 @@
 # mug
 
-Mug is a site-generator written in Rust. Its goals are:
+_The site generator for creatives_.
 
-- Practical: Works out-of-the-box with zero config. One binary with everything you need.
-- Flexible: supports blogs, websites, and [digital gardens](https://maggieappleton.com/garden-history).
+Use it to publish your personal page, portfolio, or [digital garden](https://maggieappleton.com/garden-history). It does blogs and websites too.
+
+- Easy: Works out-of-the-box. Comes with an app. One native binary with everything you need.
+- Flexible: Rich markup, custom collections, powerful templates, and more.
 - Fast: Embarrasingly parallel rendering with Rust.
 
 ## Features
 
-Mug has everything you need for publishing blogs, websites, and [Digital gardens](https://maggieappleton.com/garden-history)...
+Mug has everything you need to publish blogs, websites, and [Digital gardens](https://maggieappleton.com/garden-history)...
 
+- Fancy Markdown: Aims to be maximally compatible with GitHub-flavored Markdown and [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your vault.
 - Blogs: Create any number of blogs or newsfeeds on the same site.
 - Custom collections: A poweful query system lets you collect pages into any grouping you want.
 - Multiple taxonomies: Organize your content along multiple axes. Want to categorize by tag? Series? Publication? Phase of the moon? No problem.
 - Archives: Generate custom paginated archives for taxonomies and collections.
-- Fancy Markdown: Aims to be maximally compatible with GitHub-flavored Markdown and [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your vault.
 - Wikilinks: smart wikilinks that resolve using the same algorithm as Obsidian.
 - Backlinks: list pages that link to a page.
 - Hashtags: auto-appended to tags and stripped from output.
@@ -613,4 +615,3 @@ The scaffold ships a starter RSS archive and a sitemap page that work out of the
 
 Behavioral configuration lives in files, not flags — the one exception is
 `mug build --drafts`, which force-includes [drafts](#drafts) in a build.
-

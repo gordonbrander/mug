@@ -65,12 +65,9 @@ fn run_build(fixture: &str) {
         }
     }
 
-    let prev_cwd = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&temp_root).unwrap();
-    let build_result = mug::build(false);
-    std::env::set_current_dir(&prev_cwd).unwrap();
-
-    build_result.unwrap();
+    // Build against the temp project root directly — no chdir, so tests stay
+    // parallel-safe.
+    mug::build(&temp_root, false).unwrap();
 
     let cleanup_on_panic = AssertCtx {
         actual_root: temp_root.join("public"),
@@ -245,11 +242,7 @@ fn scaffold() {
     let demo = temp_root.join("demo");
     mug::new(&demo).unwrap();
 
-    let prev_cwd = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&demo).unwrap();
-    let build_result = mug::build(false);
-    std::env::set_current_dir(&prev_cwd).unwrap();
-    build_result.unwrap();
+    mug::build(&demo, false).unwrap();
 
     let ctx = AssertCtx {
         actual_root: demo.join("public"),

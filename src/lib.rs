@@ -8,6 +8,7 @@ pub mod frontmatter;
 pub mod html;
 pub mod permalink;
 pub mod query;
+pub mod report;
 pub mod site_data;
 pub mod taxonomy;
 pub mod tera_env;
@@ -15,25 +16,41 @@ pub mod tera_env;
 mod test_util;
 
 use anyhow::Result;
+use report::{BuildReport, Reporter, ServeHandle};
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+/// Scaffold a new starter site at `path` (which must not yet exist).
 pub fn new(path: &Path) -> Result<()> {
     command::scaffold::run(path)
 }
 
-pub fn watch() -> Result<()> {
-    command::watch::run()
+/// Watch the project at `root` and rebuild on change until interrupted, reporting
+/// progress through `reporter`.
+pub fn watch(root: &Path, reporter: Arc<dyn Reporter>) -> Result<()> {
+    command::watch::run(root, reporter.as_ref())
 }
 
-pub fn serve(host: IpAddr, port: u16) -> Result<()> {
-    command::serve::run(host, port)
+/// Serve the project at `root` with live reload, reporting through `reporter`.
+/// Call [`ServeHandle::stop`] on `handle` (from any thread) to shut it down.
+pub fn serve(
+    root: &Path,
+    host: IpAddr,
+    port: u16,
+    reporter: Arc<dyn Reporter>,
+    handle: ServeHandle,
+) -> Result<()> {
+    command::serve::run(root, host, port, reporter, handle)
 }
 
-pub fn clean() -> Result<()> {
-    command::clean::run()
+/// Remove the output directory of the project at `root`. Returns the removed
+/// directory, or `None` if there was nothing to remove.
+pub fn clean(root: &Path) -> Result<Option<PathBuf>> {
+    command::clean::run(root)
 }
 
-pub fn build(include_drafts: bool) -> Result<()> {
-    build::run(include_drafts)
+/// Build the project at `root` once, returning a [`BuildReport`].
+pub fn build(root: &Path, include_drafts: bool) -> Result<BuildReport> {
+    build::run(root, include_drafts)
 }
