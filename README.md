@@ -593,11 +593,3 @@ The scaffold ships a starter RSS archive and a sitemap page that work out of the
 Behavioral configuration lives in files, not flags — the one exception is
 `mug build --drafts`, which force-includes [drafts](#drafts) in a build.
 
-## Scope and limits (v1)
-
-- **Full-rebuild only.** Every `watch` event triggers a full rebuild. The query
-  model is fundamentally at odds with cheap incremental builds.
-- **No asset pipeline.** `static/` is copied verbatim. No bundling, no
-  minification, no fingerprinting.
-- **Markdown and raw HTML only.** No reStructuredText, AsciiDoc, etc.
-- **Tera macros are the only extension point.** No embedded scripting.
