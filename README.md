@@ -441,6 +441,34 @@ array of `{key, value}` objects sorted by key — handy for walking a
 
 Available in: template phase, content phase.
 
+### `dirtree` — fold docs into a directory tree
+
+`docs | dirtree` groups an array of docs by their output path and returns the
+content root's children as a tree, so you can render docs as a hierarchy
+(sitemap, archive index, file-browser nav) instead of a flat list. Each node is
+either a directory (`kind: "dir"`, with `children`) or a file (`kind: "file"`,
+with the original `doc`); both carry a `name` (the path segment) and a `path`
+(the accumulated output path). Children are sorted by `name`. Walk it with a
+recursive macro:
+
+```jinja
+{% macro tree(nodes) %}
+<ul>
+  {% for n in nodes %}
+    {% if n.kind == "dir" %}
+      <li>{{ n.name }}{{ self::tree(nodes=n.children) }}</li>
+    {% else %}
+      <li><a href="{{ n.doc.id_path | link }}">{{ n.doc.title }}</a></li>
+    {% endif %}
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{{ self::tree(nodes=collection(name="posts") | dirtree) }}
+```
+
+Available in: template phase, content phase.
+
 ### `truncate_words` — word-aware truncation
 
 `text | truncate_words(length=N)` truncates at the last whitespace that fits,
@@ -586,11 +614,3 @@ The scaffold ships a starter RSS archive and a sitemap page that work out of the
 Behavioral configuration lives in files, not flags — the one exception is
 `mug build --drafts`, which force-includes [drafts](#drafts) in a build.
 
-## Scope and limits (v1)
-
-- **Full-rebuild only.** Every `watch` event triggers a full rebuild. The query
-  model is fundamentally at odds with cheap incremental builds.
-- **No asset pipeline.** `static/` is copied verbatim. No bundling, no
-  minification, no fingerprinting.
-- **Markdown and raw HTML only.** No reStructuredText, AsciiDoc, etc.
-- **Tera macros are the only extension point.** No embedded scripting.

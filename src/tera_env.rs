@@ -10,6 +10,7 @@
 
 mod backlinks;
 mod collection;
+mod dirtree;
 mod doc;
 mod entries;
 mod macros;
@@ -90,6 +91,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     );
     text::register(&mut tera);
     entries::register(&mut tera);
+    dirtree::register(&mut tera);
     markdown::register(&mut tera, options.clone(), SYNTECT.clone());
     let macro_preamble = macros::macro_preamble(&template_names);
     Ok(MarkupEnv {
@@ -122,6 +124,7 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
     );
     text::register(&mut env);
     entries::register(&mut env);
+    dirtree::register(&mut env);
     markdown::register(&mut env, markup_options(), SYNTECT.clone());
     Ok(env)
 }
