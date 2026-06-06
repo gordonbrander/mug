@@ -2,6 +2,24 @@
 name = "italic"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.95"
+authors = ["Gordon Brander"]
+description = "A static site generator for creatives"
+documentation = "https://docs.rs/italic"
+homepage = "https://github.com/gordonbrander/italic"
+repository = "https://github.com/gordonbrander/italic"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+keywords = ["static-site", "ssg", "markdown", "blog", "digital-garden"]
+categories = ["command-line-utilities", "web-programming", "text-processing"]
+exclude = [
+    "plan.md",
+    "spec.md",
+    "TODO.md",
+    "docs/",
+    ".github/",
+    ".claude/",
+]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
