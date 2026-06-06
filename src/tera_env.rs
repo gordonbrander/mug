@@ -10,11 +10,14 @@
 
 mod backlinks;
 mod collection;
+mod dir;
 mod dirtree;
 mod doc;
 mod entries;
+mod filter_in_dir;
 mod macros;
 mod markdown;
+mod omit_docs;
 mod related;
 mod taxonomy;
 mod text;
@@ -92,7 +95,10 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     );
     text::register(&mut tera);
     entries::register(&mut tera);
+    dir::register(&mut tera);
     dirtree::register(&mut tera);
+    filter_in_dir::register(&mut tera);
+    omit_docs::register(&mut tera);
     markdown::register(&mut tera, options.clone(), SYNTECT.clone());
     let macro_preamble = macros::macro_preamble(&template_names);
     Ok(MarkupEnv {
@@ -126,7 +132,10 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
     );
     text::register(&mut env);
     entries::register(&mut env);
+    dir::register(&mut env);
     dirtree::register(&mut env);
+    filter_in_dir::register(&mut env);
+    omit_docs::register(&mut env);
     markdown::register(&mut env, markup_options(), SYNTECT.clone());
     Ok(env)
 }
@@ -880,6 +889,56 @@ mod tests {
             template
                 .render_str("{{ \"*x*\" | markdown }}", &tera::Context::new())
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn dir_function_registered_on_both_envs() {
+        let mut markup = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        assert_eq!(
+            markup
+                .tera
+                .render_str("{{ dir(path=\"a/b/c.md\") }}", &tera::Context::new())
+                .unwrap(),
+            "a/b"
+        );
+        let mut template = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert_eq!(
+            template
+                .render_str("{{ dir(path=\"a/b/c.md\") }}", &tera::Context::new())
+                .unwrap(),
+            "a/b"
+        );
+    }
+
+    #[test]
+    fn filter_in_dir_registered_on_both_envs() {
+        // Pure data shaping, so — like `dirtree` — it lands on both envs.
+        let body = "{{ [] | filter_in_dir(dir=\"foo\") | length }}";
+        let mut markup = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        assert_eq!(
+            markup.tera.render_str(body, &tera::Context::new()).unwrap(),
+            "0"
+        );
+        let mut template = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert_eq!(
+            template.render_str(body, &tera::Context::new()).unwrap(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn omit_docs_registered_on_both_envs() {
+        let body = "{{ [] | omit_docs(omit=[]) | length }}";
+        let mut markup = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        assert_eq!(
+            markup.tera.render_str(body, &tera::Context::new()).unwrap(),
+            "0"
+        );
+        let mut template = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert_eq!(
+            template.render_str(body, &tera::Context::new()).unwrap(),
+            "0"
         );
     }
 

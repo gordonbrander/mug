@@ -535,6 +535,57 @@ recursive macro:
 
 Available in: template phase, content phase.
 
+### `dir(...)` — parent directory of a path
+
+`dir(path="foo/bar/baz.png")` returns the parent directory of a `/`-separated
+path (`foo/bar`). A path with no directory (`baz.png`) yields an empty string.
+Pair it with `filter_in_dir` to derive a directory from a page's `id_path`:
+
+```jinja
+{{ dir(path=page.id_path) }}
+```
+
+Available in: template phase, content phase.
+
+### `filter_in_dir` — keep docs in one directory
+
+`docs | filter_in_dir(dir="...")` keeps only the docs whose `id_path` is an
+*immediate* child of `dir` (nested subdirectories are excluded), sorted by
+`id_path`. Combine it with `dir(...)` to list a page's siblings — the docs that
+share its directory:
+
+```jinja
+{% set siblings = collection(name="all")
+     | filter_in_dir(dir=dir(path=page.id_path), omit=[page.id_path]) %}
+{% for doc in siblings %}
+  <a href="{{ doc.id_path | link }}">{{ doc.title }}</a>
+{% endfor %}
+```
+
+Kwargs: `dir` (required — a literal directory; use `""` for top-level docs) and
+`omit` (array of `id_path` strings to exclude, e.g. `omit=[page.id_path]` to drop
+the page itself). `dir` is not auto-derived from a file path; wrap one with
+`dir(...)`.
+
+Available in: template phase, content phase.
+
+### `omit_docs` — drop docs from a list by `id_path`
+
+`docs | omit_docs(omit=[...])` removes the docs whose `id_path` appears in
+`omit`, preserving the input order. It's the general-purpose complement to the
+`omit` kwarg built into `collection`, `backlinks`, `related`, and
+`filter_in_dir` — reach for it on any list those don't cover (a `dirtree` input,
+a concatenation, or dropping the current page from a hand-built array):
+
+```jinja
+{% set others = collection(name="all") | omit_docs(omit=[page.id_path]) %}
+```
+
+Kwargs: `omit` (required — an array of `id_path` strings; an empty array is a
+passthrough).
+
+Available in: template phase, content phase.
+
 ### `truncate_words` — word-aware truncation
 
 `text | truncate_words(length=N)` truncates at the last whitespace that fits,
