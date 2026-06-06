@@ -374,6 +374,12 @@ Jinja-style templating system. Set a template with the `template` frontmatter ke
 template: post.html
 ```
 
+Templates are any `.html`, `.xml`, `.tera`, `.json`, or `.txt` file under
+`templates/`. Use `.json`/`.txt` to template those formats directly (a JSON feed,
+a `robots.txt`), or `.tera` as a generic escape hatch for any other format. Only
+`.html`/`.xml` are HTML-autoescaped; in `.tera`/`.json`/`.txt` templates characters
+like `&`, `<`, and `/` pass through verbatim (which is what JSON and plain text want).
+
 Inside a template, the available context is:
 
 - `page`: the current document (`page.title`, `page.terms`, `page.date`, …,

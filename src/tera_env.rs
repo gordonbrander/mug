@@ -144,7 +144,7 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
 
 /// Build the Tera env by overlaying every `config.template_roots()` in order:
 /// the theme's `templates/` first, the site's last, so a site template overrides
-/// a theme template of the same name. Each `.html`/`.xml` file is registered
+/// a theme template of the same name. Each template file (see [`is_template_file`]) is registered
 /// under its path relative to its root (`post.html`, `macros/youtube.html`) — so
 /// `{% extends "base.html" %}` resolves to the site's `base.html` when the site
 /// overrides it. Returns the `Tera` env alongside the registered template names
@@ -155,7 +155,7 @@ fn load_templates(config: &Config) -> Result<(Tera, Vec<String>)> {
     // `overlay_files` walks the roots and dedups per relative path (site wins);
     // map each surviving file to its `/`-joined Tera name, paired with its path.
     let files: Vec<(String, PathBuf)> =
-        config::overlay_files(&config.template_roots(), is_html_or_xml)?
+        config::overlay_files(&config.template_roots(), is_template_file)?
             .into_iter()
             .map(|(rel, path)| (rel_template_name(&rel), path))
             .collect();
@@ -173,11 +173,15 @@ fn load_templates(config: &Config) -> Result<(Tera, Vec<String>)> {
     Ok((tera, names))
 }
 
-/// Whether `path` is a template file Tera should load (`.html`/`.xml`).
-fn is_html_or_xml(path: &std::path::Path) -> bool {
+/// Whether `path` is a template file Tera should load. `.html`/`.xml` are
+/// autoescaped by Tera; `.tera`/`.json`/`.txt` are not (Tera's autoescape suffix
+/// list is `.html`/`.htm`/`.xml`), so non-markup output passes through unescaped.
+/// `.json`/`.txt` let you template those formats directly (a `feed.json`, a
+/// `robots.txt`); `.tera` is the generic escape hatch for any other format.
+fn is_template_file(path: &std::path::Path) -> bool {
     matches!(
         path.extension().and_then(|s| s.to_str()),
-        Some("html") | Some("xml")
+        Some("html") | Some("xml") | Some("tera") | Some("json") | Some("txt")
     )
 }
 
@@ -735,6 +739,46 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn tera_extension_templates_are_loaded() {
+        // `.tera` is a generic escape hatch — e.g. templating a JSON feed.
+        let o = TempOverlay::new("tera-ext");
+        o.write_template("site", "feed.json.tera", "{\"title\": \"hi\"}");
+        let mut env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let out = env
+            .render_str("{% include \"feed.json.tera\" %}", &tera::Context::new())
+            .unwrap();
+        assert_eq!(out, "{\"title\": \"hi\"}");
+    }
+
+    #[test]
+    fn json_and_txt_templates_are_loaded_and_not_autoescaped() {
+        // `.json`/`.txt` template those formats directly; like `.tera` they are
+        // not in Tera's autoescape suffix list, so values render verbatim.
+        let o = TempOverlay::new("json-txt");
+        o.write_template("site", "feed.json", "{\"t\": \"{{ v }}\"}");
+        o.write_template("site", "robots.txt", "Allow: {{ v }}");
+        let mut env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let mut ctx = tera::Context::new();
+        ctx.insert("v", "a & b");
+        assert_eq!(env.render("feed.json", &ctx).unwrap(), "{\"t\": \"a & b\"}");
+        assert_eq!(env.render("robots.txt", &ctx).unwrap(), "Allow: a & b");
+    }
+
+    #[test]
+    fn tera_extension_templates_are_not_autoescaped() {
+        // Tera's autoescape suffix list is `.html`/`.htm`/`.xml`, so a `.tera`
+        // template emits raw output — required for JSON, where `&`/`<`/`>`/`/`
+        // must pass through verbatim rather than as HTML entities.
+        let o = TempOverlay::new("tera-noescape");
+        o.write_template("site", "data.tera", "{{ v }}");
+        let mut env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let mut ctx = tera::Context::new();
+        ctx.insert("v", "a & b </x>");
+        let out = env.render("data.tera", &ctx).unwrap();
+        assert_eq!(out, "a & b </x>");
     }
 
     #[test]
