@@ -225,36 +225,39 @@ impl DocIndex {
     /// namespaces in `opts.weights` and ranked best-first. Each namespace is
     /// either a taxonomy (shared term slugs, via the inverted taxonomy index) or
     /// the [`LINKS`](crate::related::LINKS) graph, where overlap captures three
-    /// link relationships at once:
+    /// link relationships at once (symmetric — broader than backlinks alone):
     /// - **backlink** — a doc that links to `post` (`backlinks[post]`);
     /// - **forward link** — a doc `post` links to (`post.links`);
-    /// - **co-citation** — a doc that links to a target `post` also links to
-    ///   (`backlinks[target]`).
+    /// - **shared reference** — a doc that links to the same target `post` links
+    ///   to (`backlinks[target]`); bibliographic coupling.
     ///
-    /// Scores accumulate `weight * idf(df)` per shared term; `idf` is flat in
-    /// Phase 1, so this is weighted overlap counting. The query doc is never
-    /// related to itself (the guard only bites on a genuine self-link or shared
-    /// own-term), and `opts.omit` drops further docs, both before `limit`. Ties
-    /// break by `date` desc then `id_path` asc, matching the other listings.
-    /// An unknown `post` yields an empty `Vec`.
+    /// Scores accumulate `weight * idf(df, n)` per shared term, where `idf`
+    /// down-weights terms shared by many docs *relative to corpus size* — so a
+    /// rare shared tag or co-citation outweighs a common one (see
+    /// [`idf`](crate::related::idf)). The query doc is never related to itself
+    /// (the guard only bites on a genuine self-link or shared own-term), and
+    /// `opts.omit` drops further docs, both before `limit`. Ties break by `date`
+    /// desc then `id_path` asc, matching the other listings. An unknown `post`
+    /// yields an empty `Vec`.
     pub fn related(&self, post: &Path, opts: &Related) -> Vec<&Doc> {
         let Some(post_doc) = self.docs.get(post) else {
             return Vec::new();
         };
 
+        let n = self.docs.len();
         let mut scores: HashMap<PathBuf, f64> = HashMap::new();
         for (namespace, weight) in &opts.weights {
             if namespace == LINKS {
                 // Backlinks: docs that link to `post`.
-                let w = weight * idf(self.link_df(post));
+                let w = weight * idf(self.link_df(post), n);
                 for linker in self.linkers(post) {
                     *scores.entry(linker.clone()).or_default() += w;
                 }
                 for target in &post_doc.links {
-                    let w = weight * idf(self.link_df(target));
+                    let w = weight * idf(self.link_df(target), n);
                     // Forward link: `post` -> `target`.
                     *scores.entry(target.clone()).or_default() += w;
-                    // Co-citation: other docs that also link to `target`.
+                    // Shared reference: other docs that also link to `target`.
                     for linker in self.linkers(target) {
                         *scores.entry(linker.clone()).or_default() += w;
                     }
@@ -265,7 +268,7 @@ impl DocIndex {
                 };
                 for term in bucket.keys() {
                     if let Some(ids) = taxonomy.get(term) {
-                        let w = weight * idf(ids.len());
+                        let w = weight * idf(ids.len(), n);
                         for id in ids {
                             *scores.entry(id.clone()).or_default() += w;
                         }
@@ -306,7 +309,8 @@ impl DocIndex {
 
     /// Document frequency of a link-graph term `target`: how many docs share it,
     /// i.e. those that link to it plus the target doc itself (which contributes
-    /// its own id as a term). Feeds the `idf` seam; flat while `idf == 1.0`.
+    /// its own id as a term). Feeds [`idf`](crate::related::idf) so that linking
+    /// a widely-cited hub counts for less than a rarely-cited one.
     fn link_df(&self, target: &Path) -> usize {
         self.linkers(target).len() + usize::from(self.docs.contains_key(target))
     }

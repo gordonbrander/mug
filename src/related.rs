@@ -6,8 +6,16 @@
 use std::path::PathBuf;
 
 /// The reserved namespace name for the link graph. As a `related` weight key it
-/// means "score by the link graph" (forward links, backlinks, and co-citation)
-/// rather than a taxonomy. Because the link graph lives in its own index (not
+/// scores by the **whole, undirected wikilink graph** — not just backlinks. Two
+/// pages are linked-related if any of these hold (the relation is symmetric: if
+/// it relates A to B, it relates B to A):
+/// - a page this page **links to** (its outbound targets), or
+/// - a page that **links to** this page (its backlinks), or
+/// - a page that **links to the same target** this page does (a shared outbound
+///   reference — *bibliographic coupling*).
+///
+/// So this is broader than the [`backlinks`](crate::backlinks) filter, which is
+/// the incoming direction only. Because the graph lives in its own index (not
 /// the taxonomy map), a site may still *declare* a taxonomy literally named
 /// `links`; it simply can't be addressed through `related` weights, where the
 /// name is reserved for the graph.
@@ -26,10 +34,41 @@ pub struct Related {
     pub limit: Option<usize>,
 }
 
-/// Inverse-document-frequency weight for a shared term with document frequency
-/// `df`. Phase 1 stub: flat `1.0`, so every shared term counts equally. The seam
-/// exists so Phase 2 can down-weight common terms (e.g. `1.0 / (1.0 + ln df)`)
-/// against a real vault without disturbing the scorer's structure.
-pub fn idf(_df: usize) -> f64 {
-    1.0
+/// Corpus-relative inverse-document-frequency weight for a shared term that
+/// `df` of the corpus's `n` docs carry. A term shared by few docs outweighs a
+/// common one, and rarity is measured *relative to corpus size* — so the same
+/// `df` counts for more as the vault grows (a tag on 3 of 4 notes is common; on
+/// 3 of 4000 it is rare). The `1.0 +` smooths the universal-term case (`df == n`
+/// → `ln 2`) so a term on every doc still breaks ties rather than vanishing.
+/// In practice `2 <= df <= n` (a term only `post` carries is shared with no one,
+/// so it never scores), keeping the argument `> 1` and the result positive.
+pub fn idf(df: usize, n: usize) -> f64 {
+    (1.0 + n as f64 / df as f64).ln()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idf_rewards_rarer_terms() {
+        // Within one corpus, a term shared by fewer docs weighs strictly more.
+        assert!(idf(2, 100) > idf(5, 100));
+        assert!(idf(5, 100) > idf(50, 100));
+    }
+
+    #[test]
+    fn idf_is_corpus_relative() {
+        // The same df is rarer — and so weighs more — in a larger corpus.
+        assert!(idf(3, 4000) > idf(3, 4));
+    }
+
+    #[test]
+    fn idf_universal_term_stays_positive() {
+        // A term on every doc (df == n) still contributes (ln 2), so it can break
+        // ties rather than vanishing.
+        let universal = idf(10, 10);
+        assert!(universal > 0.0);
+        assert!((universal - 2.0_f64.ln()).abs() < 1e-12);
+    }
 }

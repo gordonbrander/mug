@@ -17,6 +17,7 @@ Mug has everything you need for publishing blogs, websites, and [Digital gardens
 - Fancy Markdown: Aims to be maximally compatible with GitHub-flavored Markdown and [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your vault.
 - Wikilinks: smart wikilinks that resolve using the same algorithm as Obsidian.
 - Backlinks: list pages that link to a page.
+- Related pages: surface the pages most related to a page by shared tags and links.
 - Hashtags: auto-appended to tags and stripped from output.
 - Shortcodes: easily create custom shortcodes for video embeds, responsive images, and more.
 - Content templates: Use Tera templates in Markdown.
@@ -169,6 +170,16 @@ taxonomies:
   - tags
   - category
 
+# Tune the related() filter: how much each namespace counts toward relatedness.
+# Keys are taxonomies. `links` is a special key that represents relatedness by
+# wikilink graph (links, backlinks, and co-citations).
+# Default: equal weight on every key.
+related:
+  weights:
+    tags: 2.0
+    links: 1.0
+  limit: 5
+
 # Add default frontmatter to collections
 # Defaults can be overridden on a per-page basis
 defaults:
@@ -317,6 +328,44 @@ content on complex websites.
 When hashtags are turned on (`hashtags: true` in `config.yaml`), Mug will lift inline `#hashtags` into
 the `tags` taxonomy and strip them from the rendered markup.
 
+## Related pages
+
+Mug can surface the pages most **related** to a given page — the heart of a
+digital garden. Relatedness is **weighted shared-term overlap**: two pages are
+related in proportion to how much they have in common, across two kinds of
+namespace:
+
+- **Taxonomies** — pages that share terms (two notes tagged `phenomenology`).
+- **`links`** — the **whole wikilink graph**, in both directions. This is
+  broader than the [`backlinks`](#backlinks--pages-that-link-to-this-one) filter
+  (which is incoming links only): a single symmetric measure relates two pages
+  when **any** of these hold —
+  - one page **links to** the other (an outbound link), *or*
+  - one page is **linked to by** the other (a backlink), *or*
+  - both pages **link to the same third page** (a shared reference).
+
+  Because it's symmetric, if it relates A to B it also relates B to A.
+
+Each namespace carries a `weight` you set under `related:` in `config.yaml`, so
+you can decide whether a shared tag counts for more or less than a shared link:
+
+```yaml
+related:
+  weights:
+    tags: 2.0      # a taxonomy: shared tags
+    series: 1.0    # any declared taxonomy can be weighted
+    links: 1.0     # the whole link graph (both directions; see above)
+  limit: 5         # default number of results (optional)
+```
+
+Both keys are optional. With no `related:` block, every declared taxonomy and
+the `links` graph get equal weight — so it works zero-config, relating by
+`links`, and by `tags` (and any other taxonomy) once you declare it. A page is
+never related to itself, and results are ranked best-match first.
+
+Read the related pages in a template with the [`related`](#related--pages-related-to-this-page)
+filter.
+
 ## Templates
 
 Templates live in `templates/` and use [Tera](https://keats.github.io/tera/docs/), a
@@ -412,6 +461,24 @@ Kwargs: `order_by` (`title` | `date` | `updated`), `sort` (`asc` | `desc`),
 `omit` (array of `id_path` strings to exclude — e.g. `omit=[page.id_path]` to
 drop a page's self-link from its own backlinks), and `limit` (max items).
 Default is `order_by=date, sort=desc`.
+
+Available in: template phase.
+
+### `related` — pages related to this page
+
+Lists the pages most related to a page, ranked best-match first, using the
+weights configured under [`related:`](#related-pages) in `config.yaml`:
+
+```jinja
+{% for doc in page.id_path | related(limit=5) %}
+  <li><a href="{{ doc.id_path | link }}">{{ doc.title }}</a></li>
+{% endfor %}
+```
+
+Kwargs: `limit` (max items) and `omit` (array of `id_path` strings to exclude),
+both overriding the config defaults for this call. The page is always excluded
+from its own results; ties break by `date` desc then `id_path`. The per-namespace
+`weights` come from config, not kwargs.
 
 Available in: template phase.
 
@@ -613,4 +680,3 @@ The scaffold ships a starter RSS archive and a sitemap page that work out of the
 
 Behavioral configuration lives in files, not flags — the one exception is
 `mug build --drafts`, which force-includes [drafts](#drafts) in a build.
-
