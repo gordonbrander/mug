@@ -278,8 +278,7 @@ Collection queries can specify:
 - `path`: A glob pattern for matching files in `content/`.
 - `order_by`: The field to sort by. Can be `title`, `date`, or `updated`. Default: `date`.
 - `sort`: The direction of the sort. Can be `asc` or `desc`. Default: `desc`.
-- `limit`: Max number of items in this collection. Defaults to "unlimited".
-- `omit`: a list of documents to exclude (by `id_path`).
+- `omit`: a list of specific documents to exclude (by `id_path`).
 
 ## Defaults
 
@@ -363,7 +362,7 @@ once you declare it. A page is never related to itself, and results are ranked
 best-match first.
 
 Read the related pages in a template with the [`related`](#related--pages-related-to-this-page)
-filter, which is also where you cap the number of results (`limit`).
+filter.
 
 ## Templates
 
@@ -414,20 +413,20 @@ collections:
     path: "posts/*.md"
     order_by: date
     sort: desc
-    limit: 10
 ```
 
 ```jinja
-{% for post in collection(name="recent_posts") %}
+{% for post in collection(name="recent_posts", limit=10) %}
   <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
 {% endfor %}
 ```
 
 Kwargs: `name` (required), plus optional `omit` (array of `id_path` strings to
-exclude) and `limit` (max items). These layer *on top of* the collection's own
-definition-time `omit`/`limit` — the cached result is filtered then truncated,
-with `omit` applied before `limit`. Handy when a page wants to exclude itself
-from a collection it belongs to:
+exclude) and `limit` (max items). `omit` layers *on top of* the collection's own
+definition-time `omit`; `limit` is a render-time cap (a collection has no
+definition-time count — that's deliberately the filter's job). The cached result
+is filtered then truncated, with `omit` applied before `limit`. Handy when a page
+wants to exclude itself from a collection it belongs to:
 
 ```jinja
 {% for post in collection(name="recent_posts", omit=[page.id_path], limit=5) %}
@@ -710,6 +709,27 @@ permalink: /tags/:term/
   <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
 {% endfor %}
 ```
+
+An archive can also cap how many items it covers with an optional `limit:`,
+useful when an archive references a collection/taxonomy by name and can't pass a
+render-time argument:
+
+```yaml
+---
+kind: collection
+collection: posts
+permalink: /blog/
+limit: 100      # paginate at most the first 100 items…
+per_page: 10    # …10 per page → 10 pages
+---
+```
+
+`limit` and `per_page` are independent and compose: `limit` caps the item set,
+then `per_page` splits that capped set into pages (so `limit: 100, per_page: 10`
+yields 10 pages, not one big page). For a **collection** archive `limit` caps the
+total; for a **taxonomy** archive (one page-set per term) it caps items *per
+term*. "First N" follows the collection's query order, or date-desc for a
+taxonomy.
 
 Pagination context (`pagination.current`, `pagination.total`,
 `pagination.prev_url`, `pagination.next_url`, `pagination.items`) is injected

@@ -630,7 +630,7 @@ mod tests {
         let dir = tempdir("config");
         let path = write_config(
             &dir,
-            "collections:\n  posts:\n    path: \"posts/*.md\"\n    limit: 5\n  recent:\n    order_by: updated\n",
+            "collections:\n  posts:\n    path: \"posts/*.md\"\n  recent:\n    order_by: updated\n",
         );
         let (config, _) = Config::load_with_theme(&path).unwrap();
         let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
@@ -638,7 +638,20 @@ mod tests {
         assert_eq!(names, vec!["posts", "recent"]);
         let posts = &config.collections[0].1;
         assert!(posts.path.is_some());
-        assert_eq!(posts.limit, Some(5));
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn collection_limit_key_errors() {
+        // `limit` is no longer a collection key; it must fail loudly (the parse
+        // error points users to the filter/archive replacements).
+        let dir = tempdir("config");
+        let path = write_config(
+            &dir,
+            "collections:\n  posts:\n    path: \"posts/*.md\"\n    limit: 5\n",
+        );
+        let err = format!("{:#}", Config::load_with_theme(&path).unwrap_err());
+        assert!(err.contains("limit"), "error should mention limit: {err}");
         cleanup(&dir);
     }
 
@@ -856,16 +869,17 @@ mod tests {
 
     #[test]
     fn theme_collections_merge_with_site_winning_by_name() {
+        use crate::query::OrderKey;
         let dir = tempdir("config");
         let theme = dir.join("theme");
         write_config_in(
             &theme,
-            "collections:\n  posts:\n    limit: 5\n  news:\n    limit: 3\n",
+            "collections:\n  posts:\n    order_by: title\n  news:\n    order_by: title\n",
         );
         let path = write_config(
             &dir,
             &format!(
-                "theme: {}\ncollections:\n  posts:\n    limit: 10\n",
+                "theme: {}\ncollections:\n  posts:\n    order_by: updated\n",
                 theme.display()
             ),
         );
@@ -873,8 +887,9 @@ mod tests {
         let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
         // Theme order preserved; site override keeps the theme's slot.
         assert_eq!(names, vec!["posts", "news"]);
-        assert_eq!(config.collections[0].1.limit, Some(10)); // site wins
-        assert_eq!(config.collections[1].1.limit, Some(3)); // theme-only kept
+        // Site's `posts` query replaces the theme's by name; theme-only `news` kept.
+        assert_eq!(config.collections[0].1.order_by, OrderKey::Updated); // site wins
+        assert_eq!(config.collections[1].1.order_by, OrderKey::Title); // theme-only kept
         cleanup(&dir);
     }
 

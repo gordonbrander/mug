@@ -1,7 +1,7 @@
 use crate::doc::Doc;
 use anyhow::{Result, anyhow};
 use globset::{Glob, GlobBuilder, GlobMatcher};
-use serde_yaml_ng::{Mapping, Value as YamlValue};
+use serde_yaml_ng::Mapping;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,6 @@ pub struct Query {
     pub path: Option<Glob>,
     pub order_by: OrderKey,
     pub sort: SortDir,
-    pub limit: Option<usize>,
     pub omit: Vec<PathBuf>,
 }
 
@@ -33,15 +32,17 @@ impl Default for Query {
             path: None,
             order_by: OrderKey::Date,
             sort: SortDir::Desc,
-            limit: None,
             omit: Vec::new(),
         }
     }
 }
 
 /// Field names accepted by query-style kwargs. Shared with the Tera adapter
-/// in `tera_env::query` so both parsers reject the same typos.
-pub(crate) const KNOWN_KEYS: &[&str] = &["path", "order_by", "sort", "limit", "omit"];
+/// in `tera_env::query` so both parsers reject the same typos. `limit` is
+/// intentionally absent: capping result counts is a render-time concern handled
+/// by the `collection()` filter's `limit=` argument (or an archive's `limit:`),
+/// not part of a collection's definition.
+pub(crate) const KNOWN_KEYS: &[&str] = &["path", "order_by", "sort", "omit"];
 
 impl Query {
     /// Build from a YAML map (e.g. the `query:` sub-mapping in a generator's
@@ -55,6 +56,14 @@ impl Query {
             let key = k
                 .as_str()
                 .ok_or_else(|| anyhow!("query: keys must be strings"))?;
+            // `limit` moved out of the collection definition; point users at the
+            // render-time replacements rather than emitting a generic typo error.
+            if key == "limit" {
+                return Err(anyhow!(
+                    "query: `limit` is no longer a collection key — use the \
+                     `collection()` filter's `limit=` argument, or an archive's `limit:`"
+                ));
+            }
             if !KNOWN_KEYS.contains(&key) {
                 return Err(anyhow!(
                     "query: unknown key `{}` (allowed: {})",
@@ -124,25 +133,17 @@ impl Query {
                 .collect::<Result<Vec<_>>>()?;
         }
 
-        if let Some(v) = m.get("limit") {
-            let n = match v {
-                YamlValue::Number(n) => n
-                    .as_u64()
-                    .ok_or_else(|| anyhow!("query: `limit` must be a non-negative integer"))?,
-                _ => return Err(anyhow!("query: `limit` must be an integer")),
-            };
-            q.limit = Some(n as usize);
-        }
-
         Ok(q)
     }
 }
 
 impl Query {
-    /// Linear scan over `docs`: filter, sort, then truncate. Accepts any `&Doc`
-    /// iterator (a `&[Doc]` slice or `DocIndex`'s `HashMap` values), so there are
-    /// no secondary indexes — the spec §11 "fully populated before listing"
-    /// invariant is what makes this correct, not the data structure.
+    /// Linear scan over `docs`: filter by path glob and `omit`, then sort.
+    /// Accepts any `&Doc` iterator (a `&[Doc]` slice or `DocIndex`'s `HashMap`
+    /// values), so there are no secondary indexes — the spec §11 "fully populated
+    /// before listing" invariant is what makes this correct, not the data
+    /// structure. A query defines the *whole* matching set; capping the count is
+    /// a render-time concern (the `collection()` filter / archive `limit:`).
     pub fn evaluate<'a>(&self, docs: impl IntoIterator<Item = &'a Doc>) -> Vec<&'a Doc> {
         let matcher: Option<GlobMatcher> = self.path.as_ref().map(Glob::compile_matcher);
         let omit: HashSet<&Path> = self.omit.iter().map(PathBuf::as_path).collect();
@@ -178,10 +179,6 @@ impl Query {
             // this two docs with equal sort keys could swap between runs/machines.
             cmp.then_with(|| a.id_path.cmp(&b.id_path))
         });
-
-        if let Some(n) = self.limit {
-            results.truncate(n);
-        }
 
         results
     }
@@ -221,23 +218,34 @@ mod tests {
         assert!(q.path.is_none());
         assert_eq!(q.order_by, OrderKey::Date);
         assert_eq!(q.sort, SortDir::Desc);
-        assert!(q.limit.is_none());
     }
 
     #[test]
     fn from_yaml_mapping_all_fields() {
-        let m = yaml_mapping("path: \"posts/*.md\"\norder_by: title\nsort: asc\nlimit: 4\n");
+        let m = yaml_mapping("path: \"posts/*.md\"\norder_by: title\nsort: asc\n");
         let q = Query::from_yaml_mapping(&m).unwrap();
         assert!(q.path.is_some());
         assert_eq!(q.order_by, OrderKey::Title);
         assert_eq!(q.sort, SortDir::Asc);
-        assert_eq!(q.limit, Some(4));
     }
 
     #[test]
     fn from_yaml_mapping_unknown_key_errors() {
         let m = yaml_mapping("paht: x\n");
         assert!(Query::from_yaml_mapping(&m).is_err());
+    }
+
+    #[test]
+    fn from_yaml_mapping_limit_key_errors_with_pointer() {
+        // `limit` is no longer a collection key; the error should point at the
+        // render-time replacements.
+        let m = yaml_mapping("limit: 5\n");
+        let err = Query::from_yaml_mapping(&m).unwrap_err().to_string();
+        assert!(err.contains("limit"), "error should mention limit: {err}");
+        assert!(
+            err.contains("collection()") || err.contains("archive"),
+            "error should point at the replacement: {err}"
+        );
     }
 
     #[test]
@@ -326,15 +334,16 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_applies_limit() {
+    fn evaluate_returns_whole_matching_set() {
+        // No count cap at the query layer — the full match is returned (capping
+        // happens at render time).
         let docs = vec![
             doc("a.md", "A", "2025-01-01"),
             doc("b.md", "B", "2025-02-01"),
             doc("c.md", "C", "2025-03-01"),
         ];
-        let q = Query::from_yaml_mapping(&yaml_mapping("limit: 2\n")).unwrap();
+        let q = Query::default();
         let results = q.evaluate(&docs);
-        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
-        assert_eq!(titles, vec!["C", "B"]);
+        assert_eq!(results.len(), 3);
     }
 }

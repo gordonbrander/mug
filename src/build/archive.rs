@@ -36,6 +36,12 @@ pub struct Archive {
     pub id_path: PathBuf,
     pub kind: ArchiveKind,
     pub per_page: Option<usize>,
+    /// Max items this archive paginates over, before `per_page` splits them into
+    /// pages. For a collection archive this caps the total; for a taxonomy
+    /// archive (paginated once per term) it caps items *per term*. `None` or `0`
+    /// means no cap. Since archives reference a collection/taxonomy by name and
+    /// can't pass a render-time `limit`, this is where that bound is declared.
+    pub limit: Option<usize>,
     pub permalink: String,
     pub template: Option<String>,
     pub body: String,
@@ -89,6 +95,10 @@ impl Archive {
             .get("per_page")
             .and_then(Value::as_u64)
             .map(|n| n as usize);
+        let limit = data
+            .get("limit")
+            .and_then(Value::as_u64)
+            .map(|n| n as usize);
         let template = data
             .get("template")
             .and_then(Value::as_str)
@@ -122,6 +132,7 @@ impl Archive {
             id_path,
             kind,
             per_page,
+            limit,
             permalink,
             template,
             body,
@@ -253,6 +264,15 @@ fn paginate(
         .transpose()
         .context("serializing term context")?;
 
+    // `limit` (when set and > 0) caps the item set *before* pagination; `per_page`
+    // then splits the capped set into pages. The two are independent and compose
+    // — e.g. limit=100, per_page=5 paginates 100 items into 20 pages. `0` (like
+    // `per_page`) means no cap.
+    let items = match archive.limit.filter(|n| *n > 0) {
+        Some(n) => &items[..items.len().min(n)],
+        None => items,
+    };
+
     // per_page=0 or unset → single page with every item.
     let per_page = archive
         .per_page
@@ -336,10 +356,11 @@ mod tests {
 
     #[test]
     fn parse_collection_archive() {
-        let source = "---\nkind: collection\ncollection: posts\npermalink: /blog/\nper_page: 2\ntemplate: blog.html\n---\nBODY";
+        let source = "---\nkind: collection\ncollection: posts\npermalink: /blog/\nper_page: 2\nlimit: 6\ntemplate: blog.html\n---\nBODY";
         let a = Archive::parse(PathBuf::from("blog.html"), source).unwrap();
         assert_eq!(a.permalink, "/blog/");
         assert_eq!(a.per_page, Some(2));
+        assert_eq!(a.limit, Some(6));
         assert_eq!(a.template.as_deref(), Some("blog.html"));
         assert_eq!(a.body, "BODY");
         match a.kind {
@@ -354,6 +375,8 @@ mod tests {
         let a = Archive::parse(PathBuf::from("tags.html"), source).unwrap();
         assert_eq!(a.permalink, "/tags/:term/");
         assert_eq!(a.per_page, None);
+        // `limit` is optional and absent here.
+        assert_eq!(a.limit, None);
         match a.kind {
             ArchiveKind::Taxonomy { taxonomy } => assert_eq!(taxonomy, "tags"),
             _ => panic!("expected taxonomy kind"),

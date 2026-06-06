@@ -3,12 +3,14 @@
 //! phase. An unknown name returns an empty list (no error), so a misspelled name
 //! renders nothing rather than failing the build.
 //!
-//! Optional `omit` and `limit` kwargs layer *on top of* the collection's own
-//! definition-time `omit`/`limit` (already baked into the cached order): the
-//! cached docs are omit-filtered then truncated — no re-query, no re-sort. This
-//! is what lets a page exclude itself from a collection it belongs to, e.g.
-//! `collection(name="posts", omit=[page.id_path], limit=5)`. Matching
-//! `Query::evaluate`, omit is applied before limit.
+//! Optional `omit` and `limit` kwargs filter the cached collection at render
+//! time — the cached docs are omit-filtered then truncated, no re-query, no
+//! re-sort. `omit` layers on top of the collection's own definition-time `omit`;
+//! `limit` is a render-only cap (a collection has no definition-time count — that
+//! is deliberately the filter's job). This is what lets a page exclude itself
+//! from a collection it belongs to, e.g.
+//! `collection(name="posts", omit=[page.id_path], limit=5)`. Omit is applied
+//! before limit.
 
 use crate::doc_index::DocIndex;
 use std::collections::{HashMap, HashSet};

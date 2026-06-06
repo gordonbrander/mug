@@ -1,0 +1,8 @@
+---
+kind: collection
+collection: posts
+permalink: /blog/
+per_page: 2
+limit: 3
+---
+page {{ pagination.current }}/{{ pagination.total }}|prev:{{ pagination.prev_url | default(value="-") }}|next:{{ pagination.next_url | default(value="-") }}|{% for item in pagination.items %}{{ item.title }} {% endfor %}
