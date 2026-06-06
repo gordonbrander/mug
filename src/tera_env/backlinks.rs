@@ -1,7 +1,7 @@
-//! Tera adapter for [`crate::backlinks`]. Parses kwargs, forwards into
-//! `backlinks::list_backlinks`, serializes the result.
+//! Tera adapter for backlink listing. Parses kwargs into [`Backlinks`] options,
+//! forwards into [`DocIndex::list_backlinks`], serializes the result.
 
-use crate::backlinks::{self, Backlinks};
+use crate::backlinks::Backlinks;
 use crate::doc_index::DocIndex;
 use crate::query::{OrderKey, SortDir};
 use std::collections::HashMap;
@@ -25,7 +25,7 @@ pub fn register(env: &mut Tera, index: Arc<DocIndex>) {
             })?;
             let target = Path::new(id_path_str);
             let b = from_kwargs(args)?;
-            let results = backlinks::list_backlinks(index.docs(), target, &b);
+            let results = index.list_backlinks(target, &b);
             tera::to_value(results).map_err(tera::Error::from)
         },
     );

@@ -50,9 +50,11 @@ pub fn run(include_drafts: bool) -> Result<()> {
     // Defaults filled in for collection members before bodies render
     defaults::run(&config, &mut index)?;
     markup::run(&config, &site_data, &mut index)?;
-    // Taxonomies classify after markup (hashtags mutate terms). The index is now
-    // complete — freeze it once and share it by `Arc`.
+    // Taxonomies classify after markup (hashtags mutate terms); backlinks invert
+    // the markup-populated `doc.links`. The index is now complete — freeze it
+    // once and share it by `Arc`.
     classify::taxonomies(&config, &mut index);
+    classify::backlinks(&mut index);
     let index = Arc::new(index);
     // Archives read the frozen index and emit view pages (not classified).
     let archive_docs = archive::run(&config, &site_data, &index)?;

@@ -16,8 +16,9 @@
 //!   declared under `taxonomies:` in `config.yaml`; see
 //!   [`DocIndex::define_taxonomies`].
 
+use crate::backlinks::Backlinks;
 use crate::doc::{Doc, DocMeta};
-use crate::query::Query;
+use crate::query::{OrderKey, Query, SortDir};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,11 @@ pub struct DocIndex {
     docs: BTreeMap<PathBuf, Doc>,
     collections: HashMap<String, Vec<PathBuf>>,
     taxonomies: HashMap<String, BTreeMap<String, Vec<PathBuf>>>,
+    /// Inverted link graph: `target id_path -> id_paths of docs that link to it`.
+    /// The inverse of every doc's `links`, built once by [`define_backlinks`]
+    /// after markup populates `doc.links`. Lets [`list_backlinks`] answer in O(1)
+    /// instead of scanning every doc, and is the candidate source for `related`.
+    backlinks: HashMap<PathBuf, Vec<PathBuf>>,
 }
 
 impl DocIndex {
@@ -149,6 +155,67 @@ impl DocIndex {
     /// The named taxonomy's `term -> id_path`s map, or `None` if undefined.
     pub fn get_taxonomy(&self, name: &str) -> Option<&BTreeMap<String, Vec<PathBuf>>> {
         self.taxonomies.get(name)
+    }
+
+    // --- backlinks ---------------------------------------------------------
+
+    /// Build the inverted link graph from every doc's `links`: for each doc and
+    /// each of its outbound targets, record the doc as a linker of that target.
+    /// Iterating the `BTreeMap` in `id_path` order means each target's linker
+    /// list comes out `id_path`-sorted and deterministic; per-query ordering is
+    /// applied by [`list_backlinks`]. Must run after markup populates `doc.links`.
+    pub fn define_backlinks(&mut self) {
+        let mut backlinks: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for doc in self.docs.values() {
+            for target in &doc.links {
+                backlinks
+                    .entry(target.clone())
+                    .or_default()
+                    .push(doc.id_path.clone());
+            }
+        }
+        self.backlinks = backlinks;
+    }
+
+    /// Docs that link to `target`, ordered and filtered per `opts`. Reads the
+    /// cached inverted index ([`define_backlinks`]) — an O(1) lookup rather than
+    /// a scan over every doc — then applies `omit`, `order_by`/`sort`, and
+    /// `limit` at query time, the way [`get_collection`](Self::get_collection)
+    /// consumers layer runtime filtering over a cached listing. An unknown
+    /// `target` yields an empty `Vec`.
+    pub fn list_backlinks(&self, target: &Path, opts: &Backlinks) -> Vec<&Doc> {
+        let omit: std::collections::HashSet<&Path> =
+            opts.omit.iter().map(PathBuf::as_path).collect();
+
+        let mut results: Vec<&Doc> = self
+            .backlinks
+            .get(target)
+            .into_iter()
+            .flat_map(|ids| ids.iter())
+            .filter(|id| !omit.contains(id.as_path()))
+            .filter_map(|id| self.docs.get(id))
+            .collect();
+
+        results.sort_by(|a, b| {
+            let cmp = match opts.order_by {
+                OrderKey::Title => a.title.cmp(&b.title),
+                OrderKey::Date => a.date.cmp(&b.date),
+                OrderKey::Updated => a.updated.cmp(&b.updated),
+            };
+            let cmp = match opts.sort {
+                SortDir::Asc => cmp,
+                SortDir::Desc => cmp.reverse(),
+            };
+            // Stable tiebreak on `id_path` for a total order regardless of the
+            // cached linker order.
+            cmp.then_with(|| a.id_path.cmp(&b.id_path))
+        });
+
+        if let Some(n) = opts.limit {
+            results.truncate(n);
+        }
+
+        results
     }
 }
 
@@ -309,5 +376,158 @@ mod tests {
             doc("b.md", "B", "2025-01-02"),
         ]);
         assert_eq!(index.to_doc_metas().len(), 2);
+    }
+
+    // --- backlinks ---------------------------------------------------------
+
+    use crate::backlinks::Backlinks;
+
+    fn linking(id_path: &str, title: &str, date: &str, links: &[&str]) -> Doc {
+        Doc {
+            links: links.iter().map(PathBuf::from).collect(),
+            ..doc(id_path, title, date)
+        }
+    }
+
+    /// Build an index and populate its inverted link graph — the read+classify
+    /// pairing for backlink queries.
+    fn linked_index(docs: Vec<Doc>) -> DocIndex {
+        let mut idx = index(docs);
+        idx.define_backlinks();
+        idx
+    }
+
+    #[test]
+    fn list_backlinks_no_backlinks_returns_empty() {
+        let index = linked_index(vec![linking("a.md", "A", "2025-01-01", &[])]);
+        let results = index.list_backlinks(Path::new("b.md"), &Backlinks::default());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn list_backlinks_finds_single_backlink() {
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["b.md"]),
+            linking("b.md", "B", "2025-01-02", &[]),
+        ]);
+        let results = index.list_backlinks(Path::new("b.md"), &Backlinks::default());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "A");
+    }
+
+    #[test]
+    fn list_backlinks_finds_multiple_backlinks() {
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["b.md"]),
+            linking("c.md", "C", "2025-01-03", &["b.md", "other.md"]),
+            linking("d.md", "D", "2025-01-02", &["other.md"]),
+        ]);
+        let results = index.list_backlinks(Path::new("b.md"), &Backlinks::default());
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn list_backlinks_default_order_is_date_desc() {
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["target.md"]),
+            linking("b.md", "B", "2025-02-01", &["target.md"]),
+            linking("c.md", "C", "2025-03-01", &["target.md"]),
+        ]);
+        let results = index.list_backlinks(Path::new("target.md"), &Backlinks::default());
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["C", "B", "A"]);
+    }
+
+    #[test]
+    fn list_backlinks_order_by_title_asc() {
+        let index = linked_index(vec![
+            linking("a.md", "Charlie", "2025-01-01", &["target.md"]),
+            linking("b.md", "Alpha", "2025-01-02", &["target.md"]),
+            linking("c.md", "Bravo", "2025-01-03", &["target.md"]),
+        ]);
+        let opts = Backlinks {
+            order_by: OrderKey::Title,
+            sort: SortDir::Asc,
+            ..Default::default()
+        };
+        let results = index.list_backlinks(Path::new("target.md"), &opts);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["Alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn list_backlinks_excludes_omitted_docs() {
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["target.md"]),
+            linking("b.md", "B", "2025-02-01", &["target.md"]),
+            linking("c.md", "C", "2025-03-01", &["target.md"]),
+        ]);
+        let opts = Backlinks {
+            omit: vec![PathBuf::from("b.md")],
+            ..Default::default()
+        };
+        let results = index.list_backlinks(Path::new("target.md"), &opts);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["C", "A"]);
+    }
+
+    #[test]
+    fn list_backlinks_omit_self_drops_self_link() {
+        // The common case: a page links to itself but should not list itself
+        // among its own backlinks.
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["target.md"]),
+            linking("target.md", "Target", "2025-01-02", &["target.md"]),
+        ]);
+        let opts = Backlinks {
+            omit: vec![PathBuf::from("target.md")],
+            ..Default::default()
+        };
+        let results = index.list_backlinks(Path::new("target.md"), &opts);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["A"]);
+    }
+
+    #[test]
+    fn list_backlinks_applies_limit() {
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["target.md"]),
+            linking("b.md", "B", "2025-02-01", &["target.md"]),
+            linking("c.md", "C", "2025-03-01", &["target.md"]),
+        ]);
+        let opts = Backlinks {
+            limit: Some(2),
+            ..Default::default()
+        };
+        // Default order is date desc, so the newest two survive the truncate.
+        let results = index.list_backlinks(Path::new("target.md"), &opts);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["C", "B"]);
+    }
+
+    #[test]
+    fn list_backlinks_omit_then_limit_compose() {
+        // omit drops a doc first, then limit truncates the remainder.
+        let index = linked_index(vec![
+            linking("a.md", "A", "2025-01-01", &["target.md"]),
+            linking("b.md", "B", "2025-02-01", &["target.md"]),
+            linking("c.md", "C", "2025-03-01", &["target.md"]),
+        ]);
+        let opts = Backlinks {
+            omit: vec![PathBuf::from("c.md")],
+            limit: Some(1),
+            ..Default::default()
+        };
+        let results = index.list_backlinks(Path::new("target.md"), &opts);
+        let titles: Vec<&str> = results.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, vec!["B"]);
+    }
+
+    #[test]
+    fn list_backlinks_does_not_include_self_unless_self_links() {
+        // Source linking to itself should still appear in its own backlinks.
+        let index = linked_index(vec![linking("a.md", "A", "2025-01-01", &["a.md"])]);
+        let results = index.list_backlinks(Path::new("a.md"), &Backlinks::default());
+        assert_eq!(results.len(), 1);
     }
 }
