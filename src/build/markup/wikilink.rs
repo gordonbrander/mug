@@ -79,14 +79,7 @@ pub fn resolve_in_ast<'a>(
                 }
                 render_link(&url, &display)
             }
-            None => {
-                eprintln!(
-                    "warning: unresolved wikilink [[{}]] in {}",
-                    target,
-                    source.id_path.display()
-                );
-                render_nolink(&display)
-            }
+            None => render_nolink(&display),
         };
 
         // Collapse the node into a single raw-HTML inline, discarding the
