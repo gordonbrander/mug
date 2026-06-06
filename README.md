@@ -436,6 +436,25 @@ wants to exclude itself from a collection it belongs to:
 
 Available in: template phase.
 
+### `all()` — list every doc
+
+Returns every document on the site, with no `config.yaml` setup. Useful for a
+sitemap, a search index, or a flat archive:
+
+```jinja
+{% for doc in all() %}
+  <a href="{{ doc.id_path | link }}">{{ doc.title }}</a>
+{% endfor %}
+```
+
+Docs come back in `id_path` order. `all()` takes **no arguments** — to order,
+limit, or filter, define a [collection](#collections) (or pipe the result
+through array filters like [`omit_docs`](#omit_docs--drop-docs-from-a-list-by-id_path),
+[`dirtree`](#dirtree--fold-docs-into-a-directory-tree), or Tera's built-in
+`slice`). Passing any argument is an error rather than a silent no-op.
+
+Available in: template phase.
+
 ### `taxonomy(...)` — list a taxonomy's terms
 
 ```jinja

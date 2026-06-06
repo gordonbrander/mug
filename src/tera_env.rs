@@ -8,6 +8,7 @@
 //! meaningful at body-render time. URL filters and text filters ship on both
 //! envs — they are 1:1 lookups or string composition, not listings.
 
+mod all;
 mod backlinks;
 mod collection;
 mod dir;
@@ -117,6 +118,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
 /// adapter shares the same `Arc`, so there is no per-function clone of the docs.
 pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera> {
     let (mut env, _template_names) = load_templates(config)?;
+    all::register(&mut env, index.clone());
     collection::register(&mut env, index.clone());
     doc::register(&mut env, index.clone());
     taxonomy::register(&mut env, index.clone());
@@ -283,6 +285,52 @@ mod tests {
     }
 
     #[test]
+    fn template_env_registers_all() {
+        let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        // No docs → empty list, no error.
+        let out = env
+            .render_str("{{ all() | length }}", &tera::Context::new())
+            .unwrap();
+        assert_eq!(out, "0");
+    }
+
+    #[test]
+    fn all_lists_every_doc_in_id_path_order() {
+        let mut idx = DocIndex::new();
+        idx.insert(one_doc_at("posts/b.md"));
+        idx.insert(one_doc_at("posts/a.md"));
+        idx.insert(one_doc_at("pages/c.md"));
+        let mut env = build_template_env(&cfg_without_templates(), Arc::new(idx)).unwrap();
+        // `all()` takes no arguments; order is the index's natural id_path order.
+        let out = env
+            .render_str(
+                "{% for d in all() %}{{ d.id_path }} {% endfor %}",
+                &tera::Context::new(),
+            )
+            .unwrap();
+        assert_eq!(out, "pages/c.md posts/a.md posts/b.md ");
+    }
+
+    #[test]
+    fn all_rejects_any_argument() {
+        // Shaping is a collection's job (or an array filter's), so a stray kwarg
+        // is an error, not a silent no-op.
+        let mut env = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert!(
+            env.render_str("{{ all(limit=5) }}", &tera::Context::new())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn markup_env_does_not_register_all() {
+        // `all` lists the index, which is not meaningful at body-render time (spec §11).
+        let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        let ctx = tera::Context::new();
+        assert!(env.tera.render_str("{{ all() }}", &ctx).is_err());
+    }
+
+    #[test]
     fn template_env_registers_doc() {
         let mut env = build_template_env(&cfg_without_templates(), one_doc_snapshot()).unwrap();
         let out = env
@@ -372,6 +420,15 @@ mod tests {
         let mut env = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         let ctx = tera::Context::new();
         assert!(env.tera.render_str("{{ 'a.md' | related }}", &ctx).is_err());
+    }
+
+    /// A minimal doc at `id_path`, for the `all()` listing test.
+    fn one_doc_at(id_path: &str) -> Doc {
+        Doc {
+            id_path: PathBuf::from(id_path),
+            output_path: PathBuf::from(id_path).with_extension("html"),
+            ..Default::default()
+        }
     }
 
     fn one_doc() -> Doc {
