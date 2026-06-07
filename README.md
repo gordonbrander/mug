@@ -1,6 +1,6 @@
 # italic
 
-Italic is a static site generator for creatives. Use it to publish your portfolio, [digital gardens](https://maggieappleton.com/garden-history), or blog.
+Italic is a static site generator for creatives. Use it to publish your portfolio, [digital garden](https://maggieappleton.com/garden-history), or blog.
 
 - Simple: One binary with everything you need. Works out-of-the-box with zero config.
 - Flexible: supports wikilinks, backlinks, custom collections, custom taxonomies, and more.
