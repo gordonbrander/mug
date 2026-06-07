@@ -1,27 +1,34 @@
-# italic
+# Italic
 
-Italic is a static site generator for creatives. Use it to publish your portfolio, [digital garden](https://maggieappleton.com/garden-history), or blog.
+A static site generator for [digital gardens](https://maggieappleton.com/garden-history).
 
-- Simple: One binary with everything you need. Works out-of-the-box with zero config.
-- Flexible: supports wikilinks, backlinks, custom collections, custom taxonomies, and more.
-- Fast: Written in Rust, with an embarrassingly parallel rendering pipeline.
+- Built for thinkers: wikilinks, backlinks, custom collections, related notes, custom taxonomies, and more.
+- Batteries included: One binary with everything you need. Zero config required.
+- Fast: Build thousands of pages in < 1s. Written in Rust with an embarrassingly parallel rendering pipeline.
 
 ## Features
 
-- Markdown extensions: Aims to be compatible with GitHub-flavored Markdown and [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your Obsidian vault.
-- Blogs: create any number of blogs or newsfeeds on the same site.
-- Custom collections: A poweful query system lets you collect pages into any grouping you want.
-- Multiple taxonomies: Organize your content along multiple axes. Want to categorize by tag? Series? Publication? Phase of the moon? No problem.
-- Archives: Generate custom paginated archives for taxonomies and collections.
-- Wikilinks: smart wikilinks that resolve using the same algorithm as Obsidian.
-- Backlinks: list pages that link to a page.
-- Related pages: surface the pages most related to a page by shared tags and links.
+Italic has a number of features that make it easy publish a digital garden from your [Obsidian Vault](https://obsidian.md/), or any other folder full of Markdown.
+
+- Markdown extensions: compatible with [GitHub-flavored Markdown](https://github.github.com/gfm/) and [Obsidian Markdown](https://obsidian.md/help/syntax)
+- Wikilinks: does fuzzy link matching using the same algorithm as Obsidian.
+- Backlinks: see what links into a page
 - Hashtags: auto-appended to tags and stripped from output.
-- Shortcodes: easily create custom shortcodes for video embeds, responsive images, and more.
-- Content templates: Use Tera templates in Markdown.
-- Drafts: mark a page `draft: true` to keep it out of your published site while still previewing it locally.
+- Related: surface related pages. Uses a [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) algorithm over taxonomy and backlinks.
+
+It also has all of the other things you might expect from a static site generator, plus a few extras:
+
+- Blog-aware: publish multiple blogs from the same site.
+- Custom collections: A poweful query system lets you collect pages into any grouping you want.
+- Multiple taxonomies: Want to categorize by tag? Series? Publication? Phase of the moon? No problem.
+- Themes: customize the look and feel of your site.
+- Powerful templates: uses [Tera](https://keats.github.io/tera/docs), a familiar template syntax with template extensions, macros and more.
+- Shortcodes: easily create [Tera macros](https://keats.github.io/tera/docs/#macros) for video embeds, responsive images, and more.
+- Archives
+- Drafts
 - RSS feeds
 - Sitemaps
+- ...and more
 
 ## Install
 
