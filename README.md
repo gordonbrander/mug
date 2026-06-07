@@ -41,30 +41,40 @@ Scaffold an empty site:
 italic new my-site
 ```
 
-Download some themes:
+Let's add a page to our site:
 
 ```sh
-cd my-site/themes
-git archive --format=zip --remote=https://github.com/gordonbrander/italic_themes.git HEAD
+cd my-site
+echo '# Heading' > content/index.md
 ```
 
-Unzip the archive, and set a theme in your `config.yaml`:
-
-```sh
-theme: "themes/italic_themes/obsidian"
-```
-
-Run `italic scaffold` from your site root to copy some demo content from your theme.
-
-Finally,
-
+Now let's preview it:
 ```sh
 italic serve
 ```
 
+This will serve your website locally at <https://localhost:3000>.
+
+Great! But this website is pretty basic. We can add flair by downloading some starter themes:
+
+```sh
+git clone --depth 1 https://github.com/gordonbrander/italic_themes.git themes/
+```
+
+Set a theme by adding the `theme` key to your `config.yaml`: 
+
+```yaml
+# config.yaml
+theme: "themes/italic_themes/obsidian"
+```
+
+If you want, you can run `italic scaffold` to add some demo content for the theme.
+
+Check out your browser. You now have a pretty website! 
+
 ## CLI
 
-| Command                | Purpose                                          |
+| Commanud                | Purpose                                          |
 |------------------------|--------------------------------------------------|
 | `italic build`          | Run the full pipeline once into `output_dir`. Excludes drafts; pass `--drafts` to include them. |
 | `italic serve`          | Serve + rebuild on every change. Includes drafts. |
