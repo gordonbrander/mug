@@ -760,7 +760,7 @@ mod tests {
         let o = TempOverlay::new("json-txt");
         o.write_template("site", "feed.json", "{\"t\": \"{{ v }}\"}");
         o.write_template("site", "robots.txt", "Allow: {{ v }}");
-        let mut env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
         let mut ctx = tera::Context::new();
         ctx.insert("v", "a & b");
         assert_eq!(env.render("feed.json", &ctx).unwrap(), "{\"t\": \"a & b\"}");
@@ -774,7 +774,7 @@ mod tests {
         // must pass through verbatim rather than as HTML entities.
         let o = TempOverlay::new("tera-noescape");
         o.write_template("site", "data.tera", "{{ v }}");
-        let mut env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
+        let env = build_template_env(&o.cfg(), empty_snapshot()).unwrap();
         let mut ctx = tera::Context::new();
         ctx.insert("v", "a & b </x>");
         let out = env.render("data.tera", &ctx).unwrap();

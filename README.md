@@ -1,20 +1,18 @@
 # italic
 
-Italic is a site-generator written in Rust. Its goals are:
+Italic is a static site generator for creatives. Use it to publish your portfolio, [digital gardens](https://maggieappleton.com/garden-history), or blog.
 
-- Practical: Works out-of-the-box with zero config. One binary with everything you need.
-- Flexible: supports blogs, websites, and [digital gardens](https://maggieappleton.com/garden-history).
-- Fast: Embarrasingly parallel rendering with Rust.
+- Simple: One binary with everything you need. Works out-of-the-box with zero config.
+- Flexible: supports wikilinks, backlinks, custom collections, custom taxonomies, and more.
+- Fast: Written in Rust, with an embarrassingly parallel rendering pipeline.
 
 ## Features
 
-Italic has everything you need for publishing blogs, websites, and [Digital gardens](https://maggieappleton.com/garden-history)...
-
-- Blogs: Create any number of blogs or newsfeeds on the same site.
+- Markdown extensions: Aims to be compatible with GitHub-flavored Markdown and [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your Obsidian vault.
+- Blogs: create any number of blogs or newsfeeds on the same site.
 - Custom collections: A poweful query system lets you collect pages into any grouping you want.
 - Multiple taxonomies: Organize your content along multiple axes. Want to categorize by tag? Series? Publication? Phase of the moon? No problem.
 - Archives: Generate custom paginated archives for taxonomies and collections.
-- Fancy Markdown: Aims to be maximally compatible with GitHub-flavored Markdown and [Obsidian Markdown](https://obsidian.md/help/syntax), so you can easily publish your vault.
 - Wikilinks: smart wikilinks that resolve using the same algorithm as Obsidian.
 - Backlinks: list pages that link to a page.
 - Related pages: surface the pages most related to a page by shared tags and links.
@@ -30,23 +28,50 @@ Italic has everything you need for publishing blogs, websites, and [Digital gard
 From a clone of this repo:
 
 ```sh
-cargo install --path .
+cargo install italic
 ```
 
 This puts `italic` on your `PATH` (typically `~/.cargo/bin/italic`).
 
 ## Quick start
 
-`italic new` scaffolds a starter **digital garden**: a handful of interlinked notes
-and the bundled [`obsidian` theme](#themes), which supplies the layouts, styles,
-backlinks, and a sitemap. Open any note to see its backlinks; edit
-the theme under `themes/obsidian/`, or swap it out for your own templates.
+Scaffold an empty site:
 
 ```sh
 italic new my-site
-cd my-site
-italic serve       # Start a dev server, automatically rebuild on change
 ```
+
+Download some themes:
+
+```sh
+cd my-site/themes
+git archive --format=zip --remote=https://github.com/gordonbrander/italic_themes.git HEAD
+```
+
+Unzip the archive, and set a theme in your `config.yaml`:
+
+```sh
+theme: "themes/italic_themes/obsidian"
+```
+
+Run `italic scaffold` from your site root to copy some demo content from your theme.
+
+Finally,
+
+```sh
+italic serve
+```
+
+## CLI
+
+| Command                | Purpose                                          |
+|------------------------|--------------------------------------------------|
+| `italic build`          | Run the full pipeline once into `output_dir`. Excludes drafts; pass `--drafts` to include them. |
+| `italic serve`          | Serve + rebuild on every change. Includes drafts. |
+| `italic watch`          | Rebuild on every change (no server). |
+| `italic new <path>`     | Scaffold an empty starter site at `<path>`. |
+| `italic scaffold`       | Copy the configured theme's starter content into `content/` (skips existing files). |
+| `italic clean`          | Remove `output_dir` (default `public`).          |
 
 ## Project layout
 
@@ -56,7 +81,7 @@ archives/       # Generated archives (tags, collections, feeds, sitemaps, etc)
 templates/      # Tera layouts, partials, and macros.
 data/           # YAML files mixed into the global data cascade.
 static/         # Copied verbatim
-themes/         # Bundled themes (e.g. the `obsidian` digital-garden theme)
+themes/         # Themes you reference via `theme:` in config.yaml
 config.yaml     # Site config
 ```
 
@@ -231,11 +256,10 @@ When a theme is set, Italic layers it underneath your site:
 A theme without a `config.yaml` still contributes its files. Themes don't nest:
 a `theme:` key inside a theme's own `config.yaml` is ignored.
 
-New sites ship with the **`obsidian`** theme under `themes/obsidian/` (active via
-`theme: themes/obsidian`). It's a wiki / digital-garden look — a backlinks-aware
-note layout with content typography ported from
-[Kepano's Minimal](https://github.com/kepano/obsidian-minimal), in light and dark
-— and a working example of the layout above to copy or customize.
+Themes live outside your project — a theme is just a directory with the layout
+above. Reference one by path with `theme:` in `config.yaml`, then run
+`italic scaffold` to copy its starter content into `content/`. `italic new` ships
+no theme; bring your own or point at a shared one.
 
 ## Permalinks
 
@@ -781,17 +805,3 @@ there's somewhere to go:
 Archives read only the classification of source content (never each other's
 output), so they are order-independent and run in parallel — there is no
 execution-order key.
-
-The scaffold ships a starter RSS archive and a sitemap page that work out of the box.
-
-## CLI
-
-| Command                | Purpose                                          |
-|------------------------|--------------------------------------------------|
-| `italic build`          | Run the full pipeline once into `output_dir`. Excludes drafts; pass `--drafts` to include them. |
-| `italic watch`          | Rebuild on every change to a source dir or `config.yaml` (~150 ms debounce). Includes drafts. |
-| `italic new <path>`     | Scaffold a starter site at `<path>` (must not exist). |
-| `italic clean`          | Remove `output_dir` (default `public`).          |
-
-Behavioral configuration lives in files, not flags — the one exception is
-`italic build --drafts`, which force-includes [drafts](#drafts) in a build.

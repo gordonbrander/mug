@@ -1,12 +1,50 @@
-site:
-  title: My Garden
-  description: A digital garden built with italic.
-  # Origin used for absolute URLs in feeds and sitemaps. Edit before publishing.
-  url: https://example.com
-  # Subpath the site is hosted under, e.g. "/notes". Leave empty for root.
-  base_path: ""
+## italic site configuration.
+## Every field is optional — italic builds with no config at all. Uncomment and
+## edit what you need; the values below are the defaults.
 
-# Layer the bundled digital-garden theme: it supplies the templates, styles, and
-# config defaults (the `notes`/`all` collections and the default note layout).
-# Edit its files under themes/obsidian/, or override here — your config wins.
-theme: themes/obsidian
+## Site metadata
+# site:
+#   title: My Site
+#   description: A site built with italic.
+#   url: https://example.com
+#   # Subpath site is hosted under, e.g. "/blog". Leave empty for root.
+#   base_path: ""
+
+## Path to a theme directory. A theme overlays its templates/, static/, and
+## archives/ beneath your own and supplies config defaults. After setting this,
+# run `italic scaffold` to copy the theme's starter content into content/.
+# theme: themes/my-theme
+
+## Collections. Read in templates via collection(name="...").
+# collections:
+#   posts:
+#     path: "posts/*.md"
+#     order_by: date
+#     sort: desc
+
+## Taxonomies — frontmatter keys whose values group documents (e.g. tags).
+# taxonomies:
+#   - tags
+#   - categories
+
+## Default frontmatter for collections
+# defaults:
+#   posts:
+#     template: post.html
+
+## Weights for the `related` filter
+# related:
+#   weights:
+#     tags: 1.0
+#     links: 2.0
+
+## Scan Markdown for #hashtags and fold them into doc's tags.
+# hashtags: true
+
+## Customize source project directories.
+# content_dir: content
+# output_dir: public
+# templates_dir: templates
+# static_dir: static
+# data_dir: data
+# archives_dir: archives

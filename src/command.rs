@@ -3,6 +3,7 @@
 //! by `main.rs`.
 
 pub mod clean;
+pub mod new;
 pub mod scaffold;
 pub mod serve;
 pub mod watch;

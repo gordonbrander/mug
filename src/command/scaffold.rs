@@ -1,117 +1,126 @@
-use anyhow::{Context, Result, bail};
-use std::fs;
+use crate::config::Config;
+use crate::copy::copy_tree;
+use anyhow::{Result, bail};
 use std::path::Path;
 
-/// Files written by `italic new <dir>`. Sourced from `scaffold/` at the crate
-/// root and embedded at compile time. Add a row here to ship a new file.
-const SCAFFOLD_FILES: &[(&str, &str)] = &[
-    ("config.yaml", include_str!("../../scaffold/config.yaml")),
-    // Content: a small interlinked digital garden. Each note links to others
-    // with [[wikilinks]] so the obsidian theme's backlinks have something to show.
-    (
-        "content/index.md",
-        include_str!("../../scaffold/content/index.md"),
-    ),
-    (
-        "content/digital-garden.md",
-        include_str!("../../scaffold/content/digital-garden.md"),
-    ),
-    (
-        "content/wikilinks.md",
-        include_str!("../../scaffold/content/wikilinks.md"),
-    ),
-    (
-        "content/backlinks.md",
-        include_str!("../../scaffold/content/backlinks.md"),
-    ),
-    (
-        "content/sitemap.html",
-        include_str!("../../scaffold/content/sitemap.html"),
-    ),
-    (
-        "static/.gitkeep",
-        include_str!("../../scaffold/static/.gitkeep"),
-    ),
-    // The bundled "obsidian" theme: templates, styles, and config defaults for a
-    // wiki / digital garden. Activated by `theme: themes/obsidian` in config.yaml.
-    (
-        "themes/obsidian/config.yaml",
-        include_str!("../../scaffold/themes/obsidian/config.yaml"),
-    ),
-    (
-        "themes/obsidian/templates/base.html",
-        include_str!("../../scaffold/themes/obsidian/templates/base.html"),
-    ),
-    (
-        "themes/obsidian/templates/note.html",
-        include_str!("../../scaffold/themes/obsidian/templates/note.html"),
-    ),
-    (
-        "themes/obsidian/templates/index.html",
-        include_str!("../../scaffold/themes/obsidian/templates/index.html"),
-    ),
-    (
-        "themes/obsidian/templates/sitemap.xml",
-        include_str!("../../scaffold/themes/obsidian/templates/sitemap.xml"),
-    ),
-    (
-        "themes/obsidian/static/style.css",
-        include_str!("../../scaffold/themes/obsidian/static/style.css"),
-    ),
-];
+/// Copy the configured theme's `content/` into the project's content dir.
+///
+/// Themes live outside the project (their path is the `theme:` key in
+/// `config.yaml`) and supply templates, static assets, and config by overlay at
+/// build time — so the only thing a project needs to *own* is content. This
+/// command seeds that content from the theme's starter set. Existing files are
+/// left untouched, so it is safe to re-run and never clobbers the user's work.
+pub fn run() -> Result<()> {
+    let (config, _) = Config::load_with_theme(Path::new("config.yaml"))?;
+    scaffold(&config)
+}
 
-/// Scaffold a starter site into `target`. Errors if `target` already exists at
-/// all (even an empty dir): there is no merge or overwrite path in v1.
-pub fn run(target: &Path) -> Result<()> {
-    if target.exists() {
-        bail!("path already exists: {}", target.display());
+fn scaffold(config: &Config) -> Result<()> {
+    let Some(theme) = config.theme.as_ref() else {
+        bail!("no theme set in config.yaml; set `theme:` to a theme directory before scaffolding");
+    };
+    let theme_content = theme.join("content");
+    if !theme_content.exists() {
+        eprintln!("theme {} has no content/ to scaffold", theme.display());
+        return Ok(());
     }
-    fs::create_dir_all(target).with_context(|| format!("creating {}", target.display()))?;
-
-    for (rel, contents) in SCAFFOLD_FILES {
-        let dest = target.join(rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        }
-        fs::write(&dest, contents).with_context(|| format!("writing {}", dest.display()))?;
-    }
-
+    let report = copy_tree(&theme_content, &config.content_dir, false)?;
+    eprintln!(
+        "scaffolded {} files into {} (skipped {} existing)",
+        report.written,
+        config.content_dir.display(),
+        report.skipped
+    );
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::temp_path;
+    use crate::test_util::{cleanup, tempdir};
+    use std::fs;
+    use std::path::Path;
 
-    #[test]
-    fn errors_when_target_exists() {
-        let dir = temp_path("exists");
-        fs::create_dir_all(&dir).unwrap();
-        let err = run(&dir).unwrap_err();
-        assert!(err.to_string().contains("already exists"));
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn writes_all_scaffold_files() {
-        let dir = temp_path("writes");
-        run(&dir).unwrap();
-        for (rel, _) in SCAFFOLD_FILES {
-            let path = dir.join(rel);
-            assert!(path.exists(), "missing {}", path.display());
+    fn write(path: &Path, body: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
         }
-        fs::remove_dir_all(&dir).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     #[test]
-    fn creates_nested_parent_dirs() {
-        // themes/obsidian/templates/base.html requires nested-dir creation.
-        let dir = temp_path("nested");
-        run(&dir).unwrap();
-        assert!(dir.join("content/index.md").exists());
-        assert!(dir.join("themes/obsidian/templates/base.html").exists());
-        assert!(dir.join("themes/obsidian/static/style.css").exists());
-        fs::remove_dir_all(&dir).unwrap();
+    fn copies_theme_content_tree() {
+        let base = tempdir("scaffold");
+        let theme = base.join("theme");
+        write(&theme.join("content/index.md"), "home");
+        write(&theme.join("content/work/a.md"), "project a");
+        // A "binary" file (non-UTF-8 bytes) copies fine — it's a plain fs::copy.
+        write(&theme.join("content/img.bin"), "\u{0}\u{1}\u{2}");
+        let config = Config {
+            content_dir: base.join("content"),
+            theme: Some(theme),
+            ..Config::default()
+        };
+        scaffold(&config).unwrap();
+        assert_eq!(
+            fs::read_to_string(base.join("content/index.md")).unwrap(),
+            "home"
+        );
+        assert_eq!(
+            fs::read_to_string(base.join("content/work/a.md")).unwrap(),
+            "project a"
+        );
+        assert!(base.join("content/img.bin").exists());
+        cleanup(&base);
+    }
+
+    #[test]
+    fn skips_existing_content() {
+        let base = tempdir("scaffold");
+        let theme = base.join("theme");
+        write(&theme.join("content/index.md"), "theme version");
+        let content = base.join("content");
+        write(&content.join("index.md"), "my version");
+        let config = Config {
+            content_dir: content.clone(),
+            theme: Some(theme),
+            ..Config::default()
+        };
+        scaffold(&config).unwrap();
+        // The user's own file wins; re-running is idempotent.
+        assert_eq!(
+            fs::read_to_string(content.join("index.md")).unwrap(),
+            "my version"
+        );
+        cleanup(&base);
+    }
+
+    #[test]
+    fn errors_when_no_theme() {
+        let base = tempdir("scaffold");
+        let config = Config {
+            content_dir: base.join("content"),
+            theme: None,
+            ..Config::default()
+        };
+        let err = scaffold(&config).unwrap_err();
+        assert!(err.to_string().contains("no theme set"));
+        cleanup(&base);
+    }
+
+    #[test]
+    fn ok_when_theme_has_no_content() {
+        let base = tempdir("scaffold");
+        let theme = base.join("theme");
+        fs::create_dir_all(&theme).unwrap();
+        let config = Config {
+            content_dir: base.join("content"),
+            theme: Some(theme),
+            ..Config::default()
+        };
+        // No content/ in the theme: a notice, not an error, and nothing created.
+        scaffold(&config).unwrap();
+        assert!(!base.join("content").exists());
+        cleanup(&base);
     }
 }

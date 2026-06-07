@@ -34,6 +34,8 @@ enum Command {
         /// Output directory for the scaffolded site
         path: PathBuf,
     },
+    /// Copy the configured theme's starter content into this project's content dir
+    Scaffold,
     /// Remove the output directory
     Clean,
 }
@@ -45,6 +47,7 @@ fn main() -> Result<()> {
         Command::Watch => italic::watch(),
         Command::Serve { port, host } => italic::serve(host, port),
         Command::New { path } => italic::new(&path),
+        Command::Scaffold => italic::scaffold(),
         Command::Clean => italic::clean(),
     }
 }

@@ -151,10 +151,15 @@ impl Config {
         }
         let source =
             fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let mut config: Self = serde_yaml_ng::from_str(&source)
-            .with_context(|| format!("parsing {} into Config", path.display()))?;
         let raw: Value = serde_yaml_ng::from_str(&source)
             .with_context(|| format!("parsing {} as YAML", path.display()))?;
+        // An empty or comment-only file parses to null (not a mapping); treat it
+        // like a missing file so a fully-commented config.yaml still builds.
+        if !raw.is_mapping() {
+            return Ok((Self::default(), Mapping::new()));
+        }
+        let mut config: Self = serde_yaml_ng::from_str(&source)
+            .with_context(|| format!("parsing {} into Config", path.display()))?;
         let (site, defaults_map, collections_map, taxonomies_map, related_map) = match raw {
             Value::Mapping(mut m) => {
                 let site = match m.remove(Value::String("site".into())) {
@@ -508,6 +513,19 @@ mod tests {
         assert_eq!(config.content_dir, PathBuf::from("content"));
         assert_eq!(config.output_dir, PathBuf::from("public"));
         assert!(site.is_empty());
+    }
+
+    #[test]
+    fn empty_or_comment_only_file_yields_defaults() {
+        let dir = tempdir("config");
+        // A file that exists but holds only comments parses to YAML null.
+        let path = write_config(&dir, "# just a comment\n");
+        let (config, site) = Config::load_with_theme(&path).unwrap();
+        assert_eq!(config.content_dir, PathBuf::from("content"));
+        assert_eq!(config.output_dir, PathBuf::from("public"));
+        assert!(config.theme.is_none());
+        assert!(site.is_empty());
+        cleanup(&dir);
     }
 
     #[test]

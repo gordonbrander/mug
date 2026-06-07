@@ -1,8 +1,6 @@
 use crate::config::Config;
-use anyhow::{Context, Result};
-use std::fs;
-use std::path::Path;
-use walkdir::WalkDir;
+use crate::copy::copy_tree;
+use anyhow::Result;
 
 /// Recursively copy every file under each of `config.static_roots()` into
 /// `config.output_dir`, preserving subpaths. Roots are copied in order — the
@@ -11,32 +9,8 @@ use walkdir::WalkDir;
 /// zero-config sites still build.
 pub fn run(config: &Config) -> Result<()> {
     for root in config.static_roots() {
-        copy_tree(&root, &config.output_dir)?;
-    }
-    Ok(())
-}
-
-/// Copy every file under `root` into `output_dir`, preserving subpaths. A
-/// missing `root` is a no-op.
-fn copy_tree(root: &Path, output_dir: &Path) -> Result<()> {
-    if !root.exists() {
-        return Ok(());
-    }
-    for entry in WalkDir::new(root) {
-        let entry = entry.with_context(|| format!("walking {}", root.display()))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let rel = entry
-            .path()
-            .strip_prefix(root)
-            .expect("walkdir entry is always under the root we passed in");
-        let dest = output_dir.join(rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        }
-        fs::copy(entry.path(), &dest)
-            .with_context(|| format!("copying {} -> {}", entry.path().display(), dest.display()))?;
+        // overwrite: later roots (the site's own static/) overlay earlier ones.
+        copy_tree(&root, &config.output_dir, true)?;
     }
     Ok(())
 }
@@ -45,6 +19,8 @@ fn copy_tree(root: &Path, output_dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::test_util::{cleanup, tempdir};
+    use std::fs;
+    use std::path::Path;
 
     fn write(path: &Path, body: &str) {
         if let Some(parent) = path.parent() {

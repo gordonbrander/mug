@@ -2,6 +2,7 @@ pub mod backlinks;
 pub mod build;
 pub mod command;
 pub mod config;
+pub mod copy;
 pub mod doc;
 pub mod doc_index;
 pub mod frontmatter;
@@ -20,7 +21,11 @@ use std::net::IpAddr;
 use std::path::Path;
 
 pub fn new(path: &Path) -> Result<()> {
-    command::scaffold::run(path)
+    command::new::run(path)
+}
+
+pub fn scaffold() -> Result<()> {
+    command::scaffold::run()
 }
 
 pub fn watch() -> Result<()> {
