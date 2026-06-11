@@ -19,6 +19,7 @@ use crate::config::{self, Config};
 use crate::doc::{Doc, DocMeta};
 use crate::doc_index::DocIndex;
 use crate::permalink;
+use crate::query::Query;
 use crate::site_data::SiteData;
 use crate::tera_env::{MarkupEnv, build_markup_env};
 use anyhow::{Context, Result, anyhow};
@@ -48,6 +49,12 @@ pub struct Archive {
     /// Verbatim frontmatter, so archive bodies can refer to author-supplied
     /// fields via `{{ page.data.xxx }}`.
     pub data: Mapping,
+    /// Optional late-binding query applied per term on `kind: taxonomy` archives:
+    /// each term's docs are filtered (path glob + `omit`) and re-ordered before
+    /// pagination, so a tag shared across sections can be scoped to one path
+    /// (e.g. `path: "posts/**"`). Only valid for taxonomy archives — collection
+    /// archives inherit their named collection's `Query`. See `produce`.
+    pub query: Option<Query>,
 }
 
 /// The two archive kinds, each naming a classification defined in config.
@@ -128,6 +135,29 @@ impl Archive {
             }
         };
 
+        // Optional `query:` sub-mapping. Reuses the collection `Query` parser, so
+        // it accepts/validates the same `path`/`order_by`/`sort`/`omit` keys (and
+        // gives the same `limit`-moved error). Only meaningful for taxonomy
+        // archives; a collection archive's docs already come from its named
+        // collection's query, so a `query:` there is a hard error rather than a
+        // silent no-op.
+        let query = match data.get("query") {
+            None => None,
+            Some(v) => {
+                let m = v.as_mapping().ok_or_else(|| {
+                    anyhow!("archive `{}`: `query` must be a mapping", id_path.display())
+                })?;
+                Some(Query::from_yaml_mapping(m)?)
+            }
+        };
+        if query.is_some() && matches!(kind, ArchiveKind::Collection { .. }) {
+            return Err(anyhow!(
+                "archive `{}`: `query` is only valid on `kind: taxonomy`; for a \
+                 collection archive, define the filtered collection in config.yaml instead",
+                id_path.display()
+            ));
+        }
+
         Ok(Archive {
             id_path,
             kind,
@@ -137,6 +167,7 @@ impl Archive {
             template,
             body,
             data,
+            query,
         })
     }
 }
@@ -228,10 +259,20 @@ fn produce(
                 return Ok(out);
             };
             for (slug, ids) in terms {
-                let items: Vec<Doc> = ids
+                let mut items: Vec<Doc> = ids
                     .iter()
                     .filter_map(|id| classification.doc(id).cloned())
                     .collect();
+                // Apply the archive's late-binding query (path glob + omit, then
+                // order/sort) to this term's docs. A term emptied by the filter
+                // (e.g. a tag that only appears outside the query's path) emits no
+                // page. Without a query, items keep the index's id_path order.
+                if let Some(query) = &archive.query {
+                    items = query.evaluate(items.iter()).into_iter().cloned().collect();
+                    if items.is_empty() {
+                        continue;
+                    }
+                }
                 // Display text comes from any member's term bucket; fall back to
                 // the slug if (impossibly) absent.
                 let text = items
@@ -413,6 +454,31 @@ mod tests {
         assert!(Archive::parse(PathBuf::from("x.html"), source).is_err());
     }
 
+    #[test]
+    fn parse_taxonomy_archive_with_query() {
+        let source = "---\nkind: taxonomy\ntaxonomy: tags\npermalink: /posts/tags/:term/\nquery:\n  path: \"posts/**\"\n  order_by: title\n  sort: asc\n---\nBODY";
+        let a = Archive::parse(PathBuf::from("tags.html"), source).unwrap();
+        let q = a.query.expect("query should be parsed");
+        assert!(q.path.is_some());
+        assert_eq!(q.order_by, crate::query::OrderKey::Title);
+        assert_eq!(q.sort, crate::query::SortDir::Asc);
+    }
+
+    #[test]
+    fn parse_collection_archive_with_query_errors() {
+        // `query` is taxonomy-only; on a collection archive it is a hard error,
+        // not a silent no-op.
+        let source = "---\nkind: collection\ncollection: posts\npermalink: /blog/\nquery:\n  path: \"posts/**\"\n---\nBODY";
+        assert!(Archive::parse(PathBuf::from("blog.html"), source).is_err());
+    }
+
+    #[test]
+    fn parse_taxonomy_archive_with_bad_query_key_errors() {
+        // Unknown query keys are rejected by the reused `Query` parser.
+        let source = "---\nkind: taxonomy\ntaxonomy: tags\npermalink: /tags/:term/\nquery:\n  paht: x\n---\nBODY";
+        assert!(Archive::parse(PathBuf::from("tags.html"), source).is_err());
+    }
+
     fn write_archive(base: &std::path::Path, layer: &str, rel: &str, body: &str) {
         let path = base.join(layer).join("archives").join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -452,6 +518,60 @@ mod tests {
         // Site's blog.html shadows the theme's: one page, at the site permalink.
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].output_path, PathBuf::from("site-blog/index.html"));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A doc tagged with a single `tags` term, for taxonomy-archive tests.
+    fn tagged_doc(id_path: &str, term: &str) -> Doc {
+        use std::collections::BTreeMap as Map;
+        let mut terms: Map<String, Map<String, String>> = Map::new();
+        let mut bucket = Map::new();
+        bucket.insert(term.to_string(), term.to_string());
+        terms.insert("tags".to_string(), bucket);
+        Doc {
+            id_path: PathBuf::from(id_path),
+            output_path: PathBuf::from(id_path).with_extension("html"),
+            terms,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn taxonomy_archive_query_scopes_terms_by_glob_and_skips_emptied_terms() {
+        let base = tempdir("tax-query");
+        // `shared` spans posts/ and notes/; `notesonly` lives only under notes/.
+        let mut idx = DocIndex::new();
+        idx.insert(tagged_doc("posts/a.md", "shared"));
+        idx.insert(tagged_doc("notes/b.md", "shared"));
+        idx.insert(tagged_doc("notes/c.md", "notesonly"));
+        idx.define_taxonomies(&["tags".to_string()]);
+
+        // Archive scoped to posts/**; body lists each page's item id_paths.
+        write_archive(
+            &base,
+            "site",
+            "tags.html",
+            "---\nkind: taxonomy\ntaxonomy: tags\npermalink: /posts/tags/:term/\nquery:\n  path: \"posts/**\"\n---\n{% for d in pagination.items %}{{ d.id_path }};{% endfor %}",
+        );
+        let config = Config {
+            archives_dir: base.join("site").join("archives"),
+            templates_dir: base.join("none"),
+            ..Config::default()
+        };
+        let site_data = SiteData {
+            site: Mapping::new(),
+            data: Mapping::new(),
+        };
+        let pages = run(&config, &site_data, &Arc::new(idx)).unwrap();
+
+        // `shared` gets a page; `notesonly` is emptied by the glob → skipped.
+        let outputs: Vec<String> = pages
+            .iter()
+            .map(|p| p.output_path.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(outputs, vec!["posts/tags/shared/index.html".to_string()]);
+        // That page lists only the posts/ doc, not the notes/ one.
+        assert_eq!(pages[0].content.trim(), "posts/a.md;");
         let _ = fs::remove_dir_all(&base);
     }
 
