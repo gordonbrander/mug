@@ -84,6 +84,12 @@ permalink: /tags/:term/
 
 See [Archives, feeds & sitemaps](archives.md).
 
+A term is global — it gathers docs from every path — so to scope a shared tag to
+one section (e.g. only its `posts/**` docs), filter by path: a taxonomy archive
+takes a [`query:`](archives.md#scoping-a-taxonomy-archive-with-query) sub-mapping,
+and inside any template you can pipe a term's docs through
+[`filter_by_id_path`](../reference/templates.md#filter_by_id_path--keep-docs-matching-a-path-glob).
+
 ## See also
 
 - [Configuration reference: taxonomies](../reference/config.md#taxonomies)

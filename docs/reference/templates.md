@@ -220,6 +220,29 @@ of `dir` (nested subdirectories excluded), sorted by `id_path`.
      | filter_in_dir(dir=dir(path=page.id_path), omit=[page.id_path]) %}
 ```
 
+### `filter_by_id_path` — keep docs matching a path glob
+
+**Both phases.** Keeps only the docs whose `id_path` matches `path`, a glob with
+the same semantics as a collection [query](config.md#collections):
+`literal_separator` is on, so `posts/*.md` stays within one directory while
+`posts/**` descends into subdirectories. Unlike `filter_in_dir`, it **preserves
+input order** — it filters, it never re-sorts.
+
+A taxonomy term is global (it aggregates docs from every path), so this is how you
+scope a shared tag to one section at render time:
+
+| Kwarg | Required | Meaning |
+|-------|----------|---------|
+| `path` | yes | A glob matched against each doc's `id_path`. |
+| `omit` | no | `id_path`s to exclude. |
+
+```jinja
+{% set posts = taxonomy(name="tags")["rust"] | filter_by_id_path(path="posts/**") %}
+```
+
+(For the build-phase equivalent on a taxonomy archive, see the archive
+[`query:`](../guides/archives.md#scoping-a-taxonomy-archive-with-query) key.)
+
 ### `omit_docs` — drop docs from a list by `id_path`
 
 **Both phases.** Removes docs whose `id_path` appears in `omit`, preserving
