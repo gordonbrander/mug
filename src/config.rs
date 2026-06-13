@@ -8,6 +8,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Name of the always-present collection of every doc. When a site/theme does
+/// not declare its own `all` under `collections:`, [`Config::load_with_theme`]
+/// injects one with the default [`Query`] (every doc, date desc). It backs the
+/// `all()` template function (`src/tera_env/all.rs`). Mirrors the [`LINKS`]
+/// reserved-name pattern.
+pub const ALL: &str = "all";
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -116,6 +123,13 @@ impl Config {
             let (theme_config, theme_site) = Self::load(&theme_config_path)
                 .with_context(|| format!("loading theme at {}", theme_dir.display()))?;
             config.apply_theme(&mut site, theme_config, theme_site);
+        }
+        // Guarantee an `all` collection always exists so `all()` and sitemap/RSS
+        // templates have a canonical "every doc" listing. The default Query is
+        // every doc, date desc; a site or theme may declare its own `all` to
+        // reorder, omit, or filter (full override, kept by `merge_named` above).
+        if !config.collections.iter().any(|(n, _)| n == ALL) {
+            config.collections.push((ALL.to_string(), Query::default()));
         }
         // Validate after merge: a site's `defaults:` may name a collection the
         // theme declares, so the check runs against the merged collection set.
@@ -651,7 +665,13 @@ mod tests {
             "collections:\n  posts:\n    path: \"posts/*.md\"\n  recent:\n    order_by: updated\n",
         );
         let (config, _) = Config::load_with_theme(&path).unwrap();
-        let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
+        // Filter out the always-injected `all` collection.
+        let names: Vec<&str> = config
+            .collections
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .filter(|n| *n != ALL)
+            .collect();
         // Order preserved from config.yaml.
         assert_eq!(names, vec!["posts", "recent"]);
         let posts = &config.collections[0].1;
@@ -759,10 +779,70 @@ mod tests {
 
     #[test]
     fn collections_absent_yields_empty() {
+        // No `collections:` block declares no *named* collections — but a default
+        // `all` is always injected (see `default_all_collection_injected...`), so
+        // we assert there is no user collection rather than an empty list.
         let dir = tempdir("config");
         let path = write_config(&dir, "content_dir: foo\n");
         let (config, _) = Config::load_with_theme(&path).unwrap();
-        assert!(config.collections.is_empty());
+        let named: Vec<&str> = config
+            .collections
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .filter(|n| *n != ALL)
+            .collect();
+        assert!(named.is_empty());
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn default_all_collection_injected_when_absent() {
+        use crate::query::{OrderKey, SortDir};
+        // With no `collections:` block, an `all` collection is injected with the
+        // default query (every doc, date desc) so `all()`/sitemaps have a
+        // canonical listing.
+        let dir = tempdir("config");
+        let path = write_config(&dir, "content_dir: foo\n");
+        let (config, _) = Config::load_with_theme(&path).unwrap();
+        let all = config
+            .collections
+            .iter()
+            .find(|(n, _)| n == ALL)
+            .map(|(_, q)| q)
+            .expect("an `all` collection should always exist");
+        assert!(all.path.is_none());
+        assert_eq!(all.order_by, OrderKey::Date);
+        assert_eq!(all.sort, SortDir::Desc);
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn user_all_collection_overrides_default() {
+        use crate::query::OrderKey;
+        // A site-declared `all` wins; it is not duplicated by the injected default.
+        let dir = tempdir("config");
+        let path = write_config(&dir, "collections:\n  all:\n    order_by: title\n");
+        let (config, _) = Config::load_with_theme(&path).unwrap();
+        let alls: Vec<&Query> = config
+            .collections
+            .iter()
+            .filter(|(n, _)| n == ALL)
+            .map(|(_, q)| q)
+            .collect();
+        assert_eq!(alls.len(), 1, "no duplicate `all` collection");
+        assert_eq!(alls[0].order_by, OrderKey::Title);
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn defaults_may_reference_all_without_declaring_collections() {
+        // `all` always exists, so `defaults:` may target it with no `collections:`
+        // block — which would otherwise be an unknown-collection error.
+        let dir = tempdir("config");
+        let path = write_config(&dir, "defaults:\n  all:\n    template: base.html\n");
+        let (config, _) = Config::load_with_theme(&path).unwrap();
+        assert_eq!(config.defaults.len(), 1);
+        assert_eq!(config.defaults[0].0, "all");
         cleanup(&dir);
     }
 
@@ -902,7 +982,13 @@ mod tests {
             ),
         );
         let (config, _) = Config::load_with_theme(&path).unwrap();
-        let names: Vec<&str> = config.collections.iter().map(|(n, _)| n.as_str()).collect();
+        // Filter out the always-injected `all` collection.
+        let names: Vec<&str> = config
+            .collections
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .filter(|n| *n != ALL)
+            .collect();
         // Theme order preserved; site override keeps the theme's slot.
         assert_eq!(names, vec!["posts", "news"]);
         // Site's `posts` query replaces the theme's by name; theme-only `news` kept.

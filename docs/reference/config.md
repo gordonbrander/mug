@@ -115,6 +115,15 @@ Unknown query keys are an error (typos fail loudly). There is no `limit` key —
 capping is a render-time concern; pass `limit=` to the `collection()` function
 or set `limit:` on an archive.
 
+### The `all` collection
+
+A collection named `all` always exists. If you don't declare one, the build
+injects it with the default query (every doc, date descending). It backs the
+`all()` function and is also readable as `collection(name="all")` — handy for a
+`sitemap.xml` or full archive. Declare your own `all` under `collections:` to
+change its order or contents (a `path`/`omit` may narrow it below every doc); a
+site `all` overrides a theme's, like any other collection.
+
 ## `taxonomies`
 
 An array of frontmatter field names to treat as taxonomies. There are no

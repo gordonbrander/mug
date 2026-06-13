@@ -1,15 +1,22 @@
-//! Tera adapter for the whole corpus. `all()` returns every doc in the frozen
-//! [`DocIndex`] shared across the template phase, in the default listing order
-//! (`id_path` — the `BTreeMap`'s natural order, stable across runs and machines).
-//! It is the zero-config escape hatch for "list everything" that needs no
-//! `collections:` entry in `config.yaml`.
+//! Tera adapter for the whole corpus. `all()` returns the always-present
+//! [`all`](crate::config::ALL) collection from the frozen [`DocIndex`] shared
+//! across the template phase. That collection is guaranteed to exist: when a
+//! site/theme does not declare its own `all` under `collections:`,
+//! `Config::load_with_theme` injects one with the default [`Query`], so `all()`
+//! lists every doc in date-desc order out of the box. It is the zero-config
+//! escape hatch for "list everything" that needs no `collections:` entry.
 //!
-//! It takes no arguments by design: ordering, limiting, and filtering are what
-//! collections are for (`collection(name=...)` with an `order_by`/`sort`/`omit`
-//! definition), or what the array filters do at render time (`omit_docs`,
-//! `dirtree`, `filter_in_dir`, `slice`). So any kwarg is rejected up front — a
-//! typo'd `all(limt=5)` fails loudly rather than silently ignoring the cap.
+//! Because it is backed by a collection, a site that *does* declare `all:` under
+//! `collections:` reorders, omits, or filters what `all()` returns.
+//!
+//! It still takes no arguments by design: ordering, limiting, and filtering are
+//! what collections are for (`collection(name=...)` with an `order_by`/`sort`/
+//! `omit` definition — including redefining `all` itself), or what the array
+//! filters do at render time (`omit_docs`, `dirtree`, `filter_in_dir`, `slice`).
+//! So any kwarg is rejected up front — a typo'd `all(limt=5)` fails loudly
+//! rather than silently ignoring the cap.
 
+use crate::config::ALL;
 use crate::doc_index::DocIndex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +27,7 @@ pub fn register(env: &mut Tera, index: Arc<DocIndex>) {
         "all",
         move |args: &HashMap<String, Value>| -> tera::Result<Value> {
             check_no_args(args)?;
-            let docs: Vec<&crate::doc::Doc> = index.docs().collect();
+            let docs: Vec<&crate::doc::Doc> = index.get_collection(ALL).collect();
             tera::to_value(docs).map_err(tera::Error::from)
         },
     );

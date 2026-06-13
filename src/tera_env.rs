@@ -202,6 +202,7 @@ fn rel_template_name(rel: &std::path::Path) -> String {
 mod tests {
     use super::*;
     use crate::doc::Doc;
+    use crate::query::Query;
     use std::path::PathBuf;
 
     fn cfg_without_templates() -> Config {
@@ -302,20 +303,24 @@ mod tests {
     }
 
     #[test]
-    fn all_lists_every_doc_in_id_path_order() {
+    fn all_lists_the_all_collection_in_date_desc_order() {
+        // `all()` is backed by the always-present `all` collection. With the
+        // default query (date desc) it lists every doc newest-first — distinct
+        // from the index's natural id_path order, which would be
+        // `pages/c.md posts/a.md posts/b.md`.
         let mut idx = DocIndex::new();
-        idx.insert(one_doc_at("posts/b.md"));
-        idx.insert(one_doc_at("posts/a.md"));
-        idx.insert(one_doc_at("pages/c.md"));
+        idx.insert(one_doc_dated("posts/b.md", "2025-03-01")); // newest
+        idx.insert(one_doc_dated("posts/a.md", "2025-01-01")); // oldest
+        idx.insert(one_doc_dated("pages/c.md", "2025-02-01"));
+        idx.define_collection(crate::config::ALL, &Query::default());
         let mut env = build_template_env(&cfg_without_templates(), Arc::new(idx)).unwrap();
-        // `all()` takes no arguments; order is the index's natural id_path order.
         let out = env
             .render_str(
                 "{% for d in all() %}{{ d.id_path }} {% endfor %}",
                 &tera::Context::new(),
             )
             .unwrap();
-        assert_eq!(out, "pages/c.md posts/a.md posts/b.md ");
+        assert_eq!(out, "posts/b.md pages/c.md posts/a.md ");
     }
 
     #[test]
@@ -429,11 +434,18 @@ mod tests {
         assert!(env.tera.render_str("{{ 'a.md' | related }}", &ctx).is_err());
     }
 
-    /// A minimal doc at `id_path`, for the `all()` listing test.
-    fn one_doc_at(id_path: &str) -> Doc {
+    /// A minimal doc at `id_path` dated `yyyy-mm-dd`, for the `all()` listing
+    /// test (which orders by date desc).
+    fn one_doc_dated(id_path: &str, date: &str) -> Doc {
+        let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
         Doc {
             id_path: PathBuf::from(id_path),
             output_path: PathBuf::from(id_path).with_extension("html"),
+            date,
             ..Default::default()
         }
     }

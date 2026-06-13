@@ -91,9 +91,13 @@ with `{% if %}`:
 
 ### `all()` — list every doc
 
-**Template phase.** Returns every document on the site in `id_path` order, with
-no `config.yaml` setup. Takes **no arguments** — passing any is an error rather
-than a silent no-op. To order, limit, or filter, define a collection or pipe
+**Template phase.** Returns the always-present `all` collection — every document
+on the site, by default in date-descending (newest-first) order, with no
+`config.yaml` setup. It is backed by a collection named `all` that the build
+injects automatically; declaring `collections: { all: ... }` in `config.yaml`
+lets you reorder, omit, or filter what `all()` (and `collection(name="all")`)
+returns. Takes **no arguments** — passing any is an error rather than a silent
+no-op. To order, limit, or filter ad hoc, redefine the `all` collection or pipe
 through array filters (`omit_docs`, `dirtree`, Tera's `slice`).
 
 ```jinja

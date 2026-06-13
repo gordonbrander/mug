@@ -150,17 +150,16 @@ limit: 20
 
 ## Recipe: sitemap
 
-For a sitemap covering *everything* (not just one collection), use a regular
-template-phase page instead: a `content/sitemap.xml.html`-style document is
-clumsy, so prefer an archive over your broadest collection, or an
+For a sitemap covering *everything* (not just one collection), use the built-in
+[`all` collection](../reference/config.md#the-all-collection) — it always exists
+and holds every doc (date descending). Point an archive at it, or render an
 `all()`-based page — e.g. a `templates/`-rendered doc whose body lists
-`{% for doc in all() %}{{ doc.id_path | permalink }}{% endfor %}`. For most
-sites, an archive over a `path: "**/*.md"` collection works:
+`{% for doc in all() %}{{ doc.id_path | permalink }}{% endfor %}`:
 
 ```yaml
 ---
 kind: collection
-collection: everything
+collection: all
 permalink: /sitemap.xml
 ---
 <?xml version="1.0" encoding="UTF-8"?>
