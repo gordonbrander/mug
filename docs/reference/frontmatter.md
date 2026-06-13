@@ -83,6 +83,7 @@ Templates in `archives/` use their own frontmatter vocabulary (see the
 | `permalink` | string | yes | Output pattern; `:term` available for taxonomy archives. Pages ≥ 2 get `page/N/` appended automatically. |
 | `per_page` | integer | no | Items per page. Without it, everything lands on one page. |
 | `limit` | integer | no | Cap on items **before** pagination. For a collection archive it caps the total; for a taxonomy archive it caps items per term. |
+| `query` | mapping | no | **Taxonomy archives only.** Scopes and re-orders each term's docs before pagination, using the same `path` / `order_by` / `sort` / `omit` keys as a collection [query](config.md#collections). An error on `kind: collection` archives. |
 | `template` | string | no | Layout to wrap each rendered archive page. |
 
 ## See also

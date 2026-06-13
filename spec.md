@@ -299,6 +299,12 @@ Filtering by term is the job of taxonomies (§7.1), not queries — a collection
 query is pure path-glob + ordering, which keeps it independent of the markup
 phase (so collections classify before markup; see §6).
 
+The two axes meet at render time, not in the query layer. A taxonomy is global —
+a term aggregates docs from every path — so to scope a shared term to one section
+(e.g. show only the `posts/**` docs for a tag) a template glob-filters the term's
+docs with `filter_by_id_path(path=…)`, and a `kind: taxonomy` archive does the
+same per term via its optional `query:` (§9.1).
+
 **Optional compact query language** (under consideration):
 
 ```
@@ -313,6 +319,12 @@ An **archive** (file in `archives/`) declares a `kind` and names a classificatio
 - **`kind: taxonomy`** + **`taxonomy:`** — one run per term of the named taxonomy;
   `:term` in the `permalink` is the term slug, and the body/template receives a
   `term` (`slug`, `text`) context.
+- **`query:`** (taxonomy archives only) — an optional sub-mapping with the same
+  `path`/`order_by`/`sort`/`omit` keys as a collection query (§9), applied
+  late-binding to each term's docs before pagination. This scopes a shared term
+  to a path (e.g. `path: "posts/**"`) and/or re-orders it. A term whose docs are
+  emptied by the filter emits no page. A `query:` on a `kind: collection` archive
+  is an error — define the filtered collection in `config.yaml` instead.
 - **`per_page`** — items per output page; defaults to infinity (single page).
   Each page receives a `pagination` context (current page, total pages, prev/next
   URLs, item slice).

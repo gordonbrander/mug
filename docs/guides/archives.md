@@ -44,6 +44,40 @@ permalink: /tags/:term/
 {% endfor %}
 ```
 
+## Scoping a taxonomy archive with `query:`
+
+A taxonomy is global: a term aggregates docs from *every* path, so by default a
+`tags` archive lists everything tagged `rust` regardless of where it lives. To
+scope an archive to one section — say, a `/posts/tags/:term/` page-set that only
+covers `posts/**` — add a `query:` sub-mapping. It takes the same
+`path` / `order_by` / `sort` / `omit` keys as a collection
+[query](../reference/config.md#collections), and is applied per term, just before
+pagination:
+
+```yaml
+---
+kind: taxonomy
+taxonomy: tags
+permalink: /posts/tags/:term/
+query:
+  path: "posts/**"   # only docs under posts/ count toward each term
+  order_by: title
+  sort: asc
+---
+<h1>{{ term.text }}</h1>
+{% for post in pagination.items %}
+  <a href="{{ post.id_path | permalink }}">{{ post.title }}</a>
+{% endfor %}
+```
+
+A term whose docs are *all* filtered out emits no page, so a tag used only outside
+`posts/**` simply doesn't appear. `query:` is taxonomy-only — on a
+`kind: collection` archive it's an error, since a collection archive already draws
+from its named collection's query; define the filtered collection in `config.yaml`
+instead. The render-phase counterpart for one-off scoping inside a template is the
+[`filter_by_id_path`](../reference/templates.md#filter_by_id_path--keep-docs-matching-a-path-glob)
+filter.
+
 ## Capping with `limit`
 
 `limit:` caps how many items an archive covers — useful since an archive

@@ -64,9 +64,10 @@ and (for taxonomy archives) `term`. The full shape is in the
 Beyond Tera's built-ins, italic adds functions and filters for listing
 collections (`collection()`, `all()`), taxonomies (`taxonomy()`), graph
 queries (`backlinks`, `related`), document lookup (`doc()`), list/tree
-utilities (`dirtree`, `filter_in_dir`, `omit_docs`, `entries`), text helpers
-(`truncate_words`, `markdown`), and URL builders (`permalink`, `link`,
-`relative_url`, `absolute_url`) — all documented with examples in the
+utilities (`dirtree`, `filter_in_dir`, `filter_by_id_path`, `omit_docs`,
+`entries`), text helpers (`truncate_words`, `markdown`), and URL builders
+(`permalink`, `link`, `relative_url`, `absolute_url`) — all documented with
+examples in the
 [template reference](../reference/templates.md).
 
 ## Beyond HTML

@@ -15,6 +15,7 @@ mod dir;
 mod dirtree;
 mod doc;
 mod entries;
+mod filter_by_id_path;
 mod filter_in_dir;
 mod macros;
 mod markdown;
@@ -98,6 +99,7 @@ pub fn build_markup_env(config: &Config, docs: Arc<Vec<DocMeta>>) -> Result<Mark
     entries::register(&mut tera);
     dir::register(&mut tera);
     dirtree::register(&mut tera);
+    filter_by_id_path::register(&mut tera);
     filter_in_dir::register(&mut tera);
     omit_docs::register(&mut tera);
     markdown::register(&mut tera, options.clone(), SYNTECT.clone());
@@ -136,6 +138,7 @@ pub fn build_template_env(config: &Config, index: Arc<DocIndex>) -> Result<Tera>
     entries::register(&mut env);
     dir::register(&mut env);
     dirtree::register(&mut env);
+    filter_by_id_path::register(&mut env);
     filter_in_dir::register(&mut env);
     omit_docs::register(&mut env);
     markdown::register(&mut env, markup_options(), SYNTECT.clone());
@@ -1016,6 +1019,22 @@ mod tests {
     fn filter_in_dir_registered_on_both_envs() {
         // Pure data shaping, so — like `dirtree` — it lands on both envs.
         let body = "{{ [] | filter_in_dir(dir=\"foo\") | length }}";
+        let mut markup = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
+        assert_eq!(
+            markup.tera.render_str(body, &tera::Context::new()).unwrap(),
+            "0"
+        );
+        let mut template = build_template_env(&cfg_without_templates(), empty_snapshot()).unwrap();
+        assert_eq!(
+            template.render_str(body, &tera::Context::new()).unwrap(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn filter_by_id_path_registered_on_both_envs() {
+        // Pure data shaping, so — like `filter_in_dir` — it lands on both envs.
+        let body = "{{ [] | filter_by_id_path(path=\"posts/**\") | length }}";
         let mut markup = build_markup_env(&cfg_without_templates(), empty_meta_snapshot()).unwrap();
         assert_eq!(
             markup.tera.render_str(body, &tera::Context::new()).unwrap(),
