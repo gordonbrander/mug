@@ -236,6 +236,16 @@ fn collection_self_exclude() {
 }
 
 #[test]
+fn aliases() {
+    run_build("21_aliases");
+}
+
+#[test]
+fn alias_collision() {
+    run_build("22_alias_collision");
+}
+
+#[test]
 fn scaffold() {
     // The 12_scaffold fixture has no input files — just an `expected/` dir.
     // The test exercises the real scaffold code path: scaffold into a temp dir

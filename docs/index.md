@@ -27,6 +27,7 @@ to a complete reference of every config key and template filter.
 - [Macros (shortcodes)](guides/macros.md)
 - [Archives, feeds & sitemaps](guides/archives.md)
 - [Permalinks](guides/permalinks.md)
+- [Aliases (redirects)](guides/aliases.md)
 - [Drafts](guides/drafts.md)
 - [Themes](guides/themes.md)
 - [Data files](guides/data.md)

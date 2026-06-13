@@ -376,6 +376,7 @@ fn paginate(
             terms: std::collections::BTreeMap::new(),
             date: epoch(),
             updated: epoch(),
+            aliases: Vec::new(),
             data,
             links: Vec::new(),
         };

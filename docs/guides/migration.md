@@ -42,6 +42,7 @@ embeds (`![[...]]`). Start with the
 | `layouts/_default/list.html` | An [archive template](archives.md). |
 | Taxonomies in config | Same idea: `taxonomies:` array. |
 | Shortcodes | [Tera macros](macros.md). |
+| `aliases:` frontmatter | [`aliases:`](aliases.md) — same key, same redirect-stub behavior. |
 
 ## From Zola
 
@@ -61,7 +62,9 @@ Differences to mind:
 2. Declare your taxonomies, then your collections (globs over the existing
    layout).
 3. Recreate permalinks with `defaults:` so URLs don't break; spot-check old
-   URLs against the new output.
+   URLs against the new output. Where a URL *does* change, add the old one to
+   the page's [`aliases:`](aliases.md) so existing links redirect instead of
+   404.
 4. Port layouts to Tera one at a time, starting with `base.html`.
 5. Wire archives for listings and feeds.
 

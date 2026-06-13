@@ -31,6 +31,10 @@ pub struct Doc {
     pub terms: BTreeMap<String, BTreeMap<String, String>>,
     pub date: DateTime<Utc>,
     pub updated: DateTime<Utc>,
+    /// Literal historical URLs this doc should also be reachable at. Each emits a
+    /// client-side redirect stub pointing at the doc's canonical URL (see
+    /// `build::alias`). Read from the `aliases:` frontmatter sequence.
+    pub aliases: Vec<String>,
     pub data: Mapping,
     pub links: Vec<PathBuf>,
 }
@@ -103,6 +107,7 @@ impl Default for Doc {
             terms: BTreeMap::new(),
             date: DateTime::<Utc>::UNIX_EPOCH,
             updated: DateTime::<Utc>::UNIX_EPOCH,
+            aliases: Vec::new(),
             data: Mapping::new(),
             links: Vec::new(),
         }
@@ -143,6 +148,7 @@ impl Doc {
             .unwrap_or(false);
         self.template = uplift_string(&self.data, "template");
         self.terms = uplift_terms(&self.data, taxonomies);
+        self.aliases = uplift_aliases(&self.data);
         if let Some(date) = parse_date(self.data.get("date")) {
             self.date = date;
         }
@@ -236,6 +242,19 @@ fn resolve_output_path(id_path: &Path, data: &Mapping, date: &DateTime<Utc>) -> 
 
 fn uplift_string(data: &Mapping, key: &str) -> Option<String> {
     data.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+/// Read the `aliases:` frontmatter field as a string sequence, skipping any
+/// non-string entries (same tolerance as [`uplift_terms`]). Missing or
+/// non-sequence → empty.
+fn uplift_aliases(data: &Mapping) -> Vec<String> {
+    match data.get("aliases") {
+        Some(Value::Sequence(seq)) => seq
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Build the per-doc `terms` map: one bucket per configured taxonomy, read from
@@ -393,6 +412,27 @@ mod tests {
         assert_eq!(tags.len(), 2);
         assert_eq!(tags["rust"], "rust");
         assert_eq!(tags["ssg"], "ssg");
+    }
+
+    #[test]
+    fn uplift_frontmatter_aliases_as_string_sequence() {
+        let data = map_from(&[(
+            "aliases",
+            Value::Sequence(vec![
+                Value::String("/old/".into()),
+                Value::String("/posts/legacy.html".into()),
+                Value::Number(serde_yaml_ng::Number::from(7)),
+            ]),
+        )]);
+        let d = uplifted("p.md", "", data, &tax());
+        // Non-string entries (the `7`) are skipped; order preserved.
+        assert_eq!(d.aliases, vec!["/old/", "/posts/legacy.html"]);
+    }
+
+    #[test]
+    fn uplift_frontmatter_aliases_default_empty() {
+        let d = uplifted("p.md", "", Mapping::new(), &tax());
+        assert!(d.aliases.is_empty());
     }
 
     #[test]

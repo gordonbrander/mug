@@ -16,9 +16,12 @@
 //! 6. [`archive`] ║ — run `archives/` over the frozen index, returning view pages
 //!    (never re-classified).
 //! 7. [`template`] ║ — render each source doc (read-only) and archive page into
-//!    final output, producing `(output_path, content)` pairs.
-//! 8. [`write`] — write the outputs to `output_dir`.
-//! 9. [`static_copy`] — copy `static/` over the top.
+//!    final output, producing [`Output`]s.
+//! 8. [`alias`] ║ — emit a client-side redirect stub for each doc `aliases:`
+//!    entry, appended to the outputs (generated, never classified).
+//! 9. [`write`] — write the outputs to `output_dir`, skipping path collisions
+//!    first-writer-wins (so a real page is never clobbered by an alias stub).
+//! 10. [`static_copy`] — copy `static/` over the top.
 //!
 //! Collections are pure frontmatter metadata, so they classify before markup;
 //! taxonomies depend on the markup-phase hashtag pass, so they classify after.
@@ -26,6 +29,7 @@
 //! template phase read it by shared `Arc` reference and write their output to the
 //! side, so there is no corpus-wide clone.
 
+pub mod alias;
 pub mod archive;
 pub mod classify;
 pub mod defaults;
@@ -38,8 +42,17 @@ pub mod write;
 use crate::config::Config;
 use crate::site_data::SiteData;
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// One file to write: its `output_path` (relative to `output_dir`), the rendered
+/// `content`, and the `id_path` of the doc it came from. The provenance lets
+/// [`write::run`] name the culprit when two outputs collide on one path.
+pub struct Output {
+    pub output_path: PathBuf,
+    pub content: String,
+    pub id_path: PathBuf,
+}
 
 pub fn run(include_drafts: bool) -> Result<()> {
     let (config, site) = Config::load_with_theme(Path::new("config.yaml"))?;
@@ -58,8 +71,11 @@ pub fn run(include_drafts: bool) -> Result<()> {
     let index = Arc::new(index);
     // Archives read the frozen index and emit view pages (not classified).
     let archive_docs = archive::run(&config, &site_data, &index)?;
-    // Render source docs (read-only) + archive pages into output, then write.
-    let outputs = template::run(&config, &site_data, &index, archive_docs)?;
+    // Render source docs (read-only) + archive pages into output. Alias redirect
+    // stubs are appended after, so a real page always wins a path collision
+    // (write::run is first-writer-wins).
+    let mut outputs = template::run(&config, &site_data, &index, archive_docs)?;
+    outputs.extend(alias::run(&config, &index)?);
     write::run(&config, &outputs)?;
     static_copy::run(&config)?;
     Ok(())

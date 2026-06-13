@@ -42,6 +42,9 @@ Two path rules:
 Paginated archive pages get `page/N/` appended to the landing permalink
 automatically (`/blog/` → `/blog/page/2/`).
 
+Changed a permalink on a page that's already published? Add the old URL to
+[`aliases:`](aliases.md) so the old link keeps working with a redirect.
+
 ## URLs: site URL and base path
 
 Two `site:` keys control how paths become full URLs:
@@ -74,5 +77,6 @@ everywhere instead of hardcoding `/`-prefixed hrefs — see
 
 ## See also
 
+- [Aliases](aliases.md) — redirect old URLs after a permalink change
 - [Frontmatter reference](../reference/frontmatter.md#permalink-patterns)
 - [Template reference: URL filters](../reference/templates.md#url-filters)

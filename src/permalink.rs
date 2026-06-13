@@ -1,5 +1,5 @@
 use chrono::{DateTime, Datelike, Utc};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Default render location: mirror `id_path` with an `.html` extension.
 /// Used when a doc declares no `permalink:` field in frontmatter.
@@ -69,6 +69,36 @@ pub fn to_url(output_path: &Path) -> String {
     } else {
         format!("/{}", s)
     }
+}
+
+/// Map an `aliases:` entry (a literal historical URL) to the output file its
+/// redirect stub is written at, following italic's trailing convention extended
+/// with Hugo's extension rule:
+///
+/// - `/old-url/`          → `old-url/index.html`  (trailing slash)
+/// - `/old-url`           → `old-url/index.html`  (no extension)
+/// - `/posts/legacy.html` → `posts/legacy.html`   (literal file)
+/// - `/feed.xml`          → `feed.xml`
+///
+/// Unlike [`expand`], **no** `:slug`/`:yyyy` token expansion happens — aliases
+/// are literal URLs, so a stray `:` is left untouched. Returns `None` for an
+/// empty/whitespace-only alias or one that escapes the output dir via `..`.
+pub fn alias_output_path(alias: &str) -> Option<PathBuf> {
+    let trimmed = alias.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Note the trailing slash before stripping the leading one.
+    let ends_slash = trimmed.ends_with('/');
+    let mut path = PathBuf::from(trimmed.trim_start_matches('/'));
+    if ends_slash || path.extension().is_none() {
+        path.push("index.html");
+    }
+    // Must stay inside `output_dir`: reject any `..` segment.
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return None;
+    }
+    Some(path)
 }
 
 #[cfg(test)]
@@ -190,5 +220,62 @@ mod tests {
     #[test]
     fn to_url_top_level_xml() {
         assert_eq!(to_url(Path::new("sitemap.xml")), "/sitemap.xml");
+    }
+
+    #[test]
+    fn alias_output_path_trailing_slash_appends_index() {
+        assert_eq!(
+            alias_output_path("/old-url/"),
+            Some(PathBuf::from("old-url/index.html")),
+        );
+    }
+
+    #[test]
+    fn alias_output_path_no_extension_appends_index() {
+        assert_eq!(
+            alias_output_path("/old-url"),
+            Some(PathBuf::from("old-url/index.html")),
+        );
+    }
+
+    #[test]
+    fn alias_output_path_literal_file() {
+        assert_eq!(
+            alias_output_path("/posts/legacy.html"),
+            Some(PathBuf::from("posts/legacy.html")),
+        );
+        assert_eq!(
+            alias_output_path("/feed.xml"),
+            Some(PathBuf::from("feed.xml")),
+        );
+    }
+
+    #[test]
+    fn alias_output_path_strips_leading_slash() {
+        assert_eq!(
+            alias_output_path("old-url/"),
+            Some(PathBuf::from("old-url/index.html")),
+        );
+    }
+
+    #[test]
+    fn alias_output_path_leaves_colon_literal() {
+        // No `:slug` token expansion — an old URL with a `:` stays verbatim.
+        assert_eq!(
+            alias_output_path("/2019/:weird/"),
+            Some(PathBuf::from("2019/:weird/index.html")),
+        );
+    }
+
+    #[test]
+    fn alias_output_path_rejects_parent_dir() {
+        assert_eq!(alias_output_path("/../escape/"), None);
+        assert_eq!(alias_output_path("/a/../../b"), None);
+    }
+
+    #[test]
+    fn alias_output_path_rejects_empty() {
+        assert_eq!(alias_output_path(""), None);
+        assert_eq!(alias_output_path("   "), None);
     }
 }
