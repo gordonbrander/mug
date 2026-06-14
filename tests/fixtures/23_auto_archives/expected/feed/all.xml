@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
 <channel>
   <title>Auto Archives</title>
   <link>https://example.com/</link>
@@ -9,24 +9,27 @@
     <link>https://example.com/posts/p2.html</link>
     <guid>https://example.com/posts/p2.html</guid>
     <pubDate>Sat, 01 Mar 2025 00:00:00 +0000</pubDate>
-    <description>Second body.
-</description>
+    <description>Second body.</description>
+    <content:encoded><![CDATA[<p>Second body.</p>
+]]></content:encoded>
   </item>
   <item>
     <title>First Post</title>
     <link>https://example.com/posts/p1.html</link>
     <guid>https://example.com/posts/p1.html</guid>
     <pubDate>Sat, 01 Feb 2025 00:00:00 +0000</pubDate>
-    <description>First body.
-</description>
+    <description>First body.</description>
+    <content:encoded><![CDATA[<p>First body.</p>
+]]></content:encoded>
   </item>
   <item>
     <title>Home</title>
     <link>https://example.com/</link>
     <guid>https://example.com/</guid>
     <pubDate>Wed, 01 Jan 2025 00:00:00 +0000</pubDate>
-    <description>Welcome.
-</description>
+    <description>Welcome.</description>
+    <content:encoded><![CDATA[<p>Welcome.</p>
+]]></content:encoded>
   </item>
 </channel>
 </rss>
