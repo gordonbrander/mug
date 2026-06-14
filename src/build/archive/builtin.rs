@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 /// Default cap on items in a built-in feed (most recent N, per the collection's
 /// own order). Sitemaps are uncapped — they should list every page.
-const DEFAULT_FEED_LIMIT: usize = 20;
+const DEFAULT_FEED_LIMIT: usize = 25;
 
 /// `sitemap.xml` body: a `<urlset>` over every page in the covered collection.
 const SITEMAP_BODY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -25,9 +25,11 @@ const SITEMAP_BODY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 {% endfor %}</urlset>
 "#;
 
-/// RSS 2.0 feed body over the covered collection (capped by `limit`).
+/// RSS 2.0 feed body over the covered collection (capped by `limit`). Each item
+/// carries the full rendered HTML in `<content:encoded>` (CDATA, with the `]]>`
+/// terminator guarded) plus a plain-text `<description>` summary.
 const FEED_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
 <channel>
   <title>{{ site.title | default(value="") }}</title>
   <link>{{ "" | absolute_url }}</link>
@@ -37,7 +39,8 @@ const FEED_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
     <link>{{ post.id_path | permalink }}</link>
     <guid>{{ post.id_path | permalink }}</guid>
     <pubDate>{{ post.date | date(format="%a, %d %b %Y %H:%M:%S +0000") }}</pubDate>
-    <description>{{ post.content | striptags | truncate_words(length=80) }}</description>
+    <description>{{ post.summary | escape }}</description>
+    <content:encoded><![CDATA[{{ post.content | replace(from="]]>", to="]]]]><![CDATA[>") }}]]></content:encoded>
   </item>
 {% endfor %}</channel>
 </rss>

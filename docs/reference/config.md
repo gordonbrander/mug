@@ -213,7 +213,7 @@ feed:
 
 Override any feed's markup with a disk archive at the matching path (e.g.
 `archives/feed/posts.xml`). Every listed collection must be declared under
-`collections:`. Feeds cap at the 20 most recent items per the collection's own
+`collections:`. Feeds cap at the 25 most recent items per the collection's own
 order.
 
 ## Theme config merging
