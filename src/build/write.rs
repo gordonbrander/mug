@@ -10,11 +10,12 @@ use std::path::PathBuf;
 /// directories as needed.
 ///
 /// Two outputs claiming the same `output_path` is a misconfiguration (clashing
-/// `permalink`s, or an alias shadowing a real page). Rather than letting write
-/// order silently decide, the **first** writer of a path wins and any later
-/// claimant is skipped with a warning naming both docs. Because the pipeline
-/// appends alias stubs after all real pages, this guarantees a redirect stub can
-/// never clobber a real page.
+/// `permalink`s, or an alias shadowing a real page). The **first** writer of a
+/// path wins and any later claimant is skipped with a warning naming both docs.
+/// Which real page wins such a collision is arbitrary (iteration order is
+/// unspecified) — it is a bug to fix, so the warning, not the winner, is the
+/// point. Because the pipeline appends alias stubs after all real pages, a
+/// redirect stub can never clobber a real page regardless of order.
 pub fn run(config: &Config, outputs: &[Output]) -> Result<()> {
     let mut written: HashMap<&PathBuf, &PathBuf> = HashMap::new();
     for output in outputs {

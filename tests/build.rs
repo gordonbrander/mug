@@ -42,11 +42,15 @@ fn collect_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     out
 }
 
-fn run_build(fixture: &str) {
+/// Copy a fixture (minus its `expected/` dir) into a temp dir, build it in
+/// place, and return the temp root — `public/` under it holds the output. The
+/// caller is responsible for cleanup. Used directly by tests that assert on the
+/// output themselves (e.g. when the result is intentionally nondeterministic);
+/// [`run_build`] wraps it with an exact `expected/` match.
+fn build_fixture(fixture: &str) -> PathBuf {
     let _guard = CHDIR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture_dir = manifest_dir.join("tests").join("fixtures").join(fixture);
-    let expected_dir = fixture_dir.join("expected");
 
     let temp_root = std::env::temp_dir().join(format!("italic-test-{}", fixture));
     let _ = fs::remove_dir_all(&temp_root);
@@ -71,6 +75,19 @@ fn run_build(fixture: &str) {
     std::env::set_current_dir(&prev_cwd).unwrap();
 
     build_result.unwrap();
+
+    temp_root
+}
+
+fn run_build(fixture: &str) {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let expected_dir = manifest_dir
+        .join("tests")
+        .join("fixtures")
+        .join(fixture)
+        .join("expected");
+
+    let temp_root = build_fixture(fixture);
 
     let cleanup_on_panic = AssertCtx {
         actual_root: temp_root.join("public"),
@@ -242,7 +259,43 @@ fn aliases() {
 
 #[test]
 fn alias_collision() {
-    run_build("22_alias_collision");
+    // Two collisions in one build, exercising both arms of write::run's
+    // first-writer-wins handling:
+    //  - /collide/ : a real page (real.md) vs an alias stub (aliaser.md). The
+    //    real page must always win — alias stubs are appended after every real
+    //    page, so this is deterministic regardless of doc iteration order.
+    //  - /shared/  : two alias stubs (a-note.md -> /a/, b-note.md -> /b/). Both
+    //    are aliases, so the winner is arbitrary (iteration order is
+    //    unspecified). Either stub is valid; we require only that exactly one is
+    //    written. This is asserted bespoke rather than against `expected/`
+    //    precisely because the winner is intentionally nondeterministic.
+    let temp_root = build_fixture("22_alias_collision");
+    let public = temp_root.join("public");
+    let read = |rel: &str| fs::read_to_string(public.join(rel)).unwrap();
+
+    // The real page wins /collide/ — not the alias stub (which would carry a
+    // redirect <meta refresh>).
+    let collide = read("collide/index.html");
+    assert!(
+        collide.contains("Real page") && !collide.contains("http-equiv=\"refresh\""),
+        "real page must win /collide/, got: {collide}"
+    );
+
+    // The non-colliding real pages are all present.
+    assert!(public.join("a/index.html").exists());
+    assert!(public.join("b/index.html").exists());
+    assert!(public.join("aliaser/index.html").exists());
+
+    // /shared/ resolves to exactly one of the two valid alias stubs.
+    let shared = read("shared/index.html");
+    let to_a = shared.contains("url=/a/");
+    let to_b = shared.contains("url=/b/");
+    assert!(
+        to_a ^ to_b,
+        "/shared/ must be exactly one of the two alias stubs, got: {shared}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_root);
 }
 
 #[test]

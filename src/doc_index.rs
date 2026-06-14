@@ -1,6 +1,10 @@
 //! The in-memory doc store threaded through every build phase. Owns all docs in
-//! a `BTreeMap<PathBuf, Doc>` keyed by `id_path` — a `BTreeMap` so iteration is
-//! naturally sorted by `id_path`, giving every consumer a stable order for free.
+//! a `HashMap<PathBuf, Doc>` keyed by `id_path`, so the dominant access pattern
+//! — O(1) keyed lookup (`doc`, `doc_mut`, `output_path`) — is as cheap as it
+//! gets. Iteration order is therefore unspecified: any consumer that needs a
+//! meaningful order must sort explicitly, and all of them do (collections via
+//! the query sort, taxonomy buckets, `list_backlinks`, `related`, the wikilink
+//! resolver), each with an `id_path` tiebreak for a deterministic total order.
 //! It is the one-stop-shop for doc iteration: phases mutate docs in parallel
 //! through [`DocIndex::par_docs_mut`], read them through [`DocIndex::docs`], and
 //! project the read-only [`DocMeta`] view via [`DocIndex::to_doc_metas`].
@@ -26,9 +30,10 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Default)]
 pub struct DocIndex {
-    /// Keyed by `id_path`. A `BTreeMap` so `docs()`/`par_docs()` iterate in
-    /// sorted `id_path` order, which keeps cached listings and outputs stable.
-    docs: BTreeMap<PathBuf, Doc>,
+    /// Keyed by `id_path`, for O(1) lookup. `docs()`/`par_docs()` iterate in
+    /// unspecified order; consumers that need a meaningful order sort explicitly
+    /// (with an `id_path` tiebreak), so cached listings stay deterministic.
+    docs: HashMap<PathBuf, Doc>,
     collections: HashMap<String, Vec<PathBuf>>,
     taxonomies: HashMap<String, BTreeMap<String, Vec<PathBuf>>>,
     /// Inverted link graph: `target id_path -> id_paths of docs that link to it`.
@@ -162,9 +167,9 @@ impl DocIndex {
 
     /// Build the inverted link graph from every doc's `links`: for each doc and
     /// each of its outbound targets, record the doc as a linker of that target.
-    /// Iterating the `BTreeMap` in `id_path` order means each target's linker
-    /// list comes out `id_path`-sorted and deterministic; per-query ordering is
-    /// applied by [`list_backlinks`]. Must run after markup populates `doc.links`.
+    /// Iteration order is unspecified, so each target's linker list is unordered
+    /// here; per-query ordering (with an `id_path` tiebreak) is applied by
+    /// [`list_backlinks`]. Must run after markup populates `doc.links`.
     pub fn define_backlinks(&mut self) {
         let mut backlinks: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for doc in self.docs.values() {

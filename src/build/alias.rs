@@ -19,8 +19,9 @@ use rayon::prelude::*;
 
 /// Emit one redirect stub per `aliases:` entry across the frozen index. Stubs are
 /// mutually independent, so the work fans out over Rayon; the emitted outputs are
-/// in sorted-`id_path` order (then alias order), which makes the write-time
-/// collision tiebreak deterministic.
+/// in unspecified order. Collisions are resolved first-writer-wins by
+/// [`write::run`](super::write::run) — and since the pipeline appends these stubs
+/// after every real page, an alias can never clobber a real page.
 pub fn run(config: &Config, index: &DocIndex) -> Result<Vec<Output>> {
     let outputs = index
         .par_docs()
