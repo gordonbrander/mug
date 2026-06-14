@@ -38,6 +38,16 @@
 #     tags: 1.0
 #     links: 2.0
 
+## Auto-generated sitemap. Names the collection it covers; defaults to `all`
+## (every doc). Set to null (an empty `sitemap:`) to disable. Override the markup
+## by adding your own archives/sitemap.xml.
+# sitemap: all
+
+## Auto-generated feeds — one /feed/<name>.xml per listed collection. Defaults to
+## `[all]`. Use `[]` to disable. Override by adding archives/feed/<name>.xml.
+# feed:
+#   - all
+
 ## Scan Markdown for #hashtags and fold them into doc's tags.
 # hashtags: true
 

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+<channel>
+  <title>Auto Archives</title>
+  <link>https://example.com/</link>
+  <description>Testing built-in sitemap and feeds.</description>
+  <item>
+    <title>Second Post</title>
+    <link>https://example.com/posts/p2.html</link>
+    <guid>https://example.com/posts/p2.html</guid>
+    <pubDate>Sat, 01 Mar 2025 00:00:00 +0000</pubDate>
+    <description>Second body.
+</description>
+  </item>
+  <item>
+    <title>First Post</title>
+    <link>https://example.com/posts/p1.html</link>
+    <guid>https://example.com/posts/p1.html</guid>
+    <pubDate>Sat, 01 Feb 2025 00:00:00 +0000</pubDate>
+    <description>First body.
+</description>
+  </item>
+</channel>
+</rss>

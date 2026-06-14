@@ -119,56 +119,15 @@ renders when there's somewhere to go:
 </nav>
 ```
 
-## Recipe: RSS feed
+## Built-in feeds and sitemap
 
-An archive with an `.xml` permalink and no layout. `archives/feed.xml`:
-
-```yaml
----
-kind: collection
-collection: posts
-permalink: /feed.xml
-limit: 20
----
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
-<channel>
-  <title>{{ site.title }}</title>
-  <link>{{ "" | absolute_url }}</link>
-  <description>{{ site.description }}</description>
-  {% for post in pagination.items %}
-  <item>
-    <title>{{ post.title }}</title>
-    <link>{{ post.id_path | permalink }}</link>
-    <pubDate>{{ post.date | date(format="%a, %d %b %Y %H:%M:%S +0000") }}</pubDate>
-    <description>{{ post.content | striptags | truncate_words(length=80) }}</description>
-  </item>
-  {% endfor %}
-</channel>
-</rss>
-```
-
-## Recipe: sitemap
-
-For a sitemap covering *everything* (not just one collection), use the built-in
-[`all` collection](../reference/config.md#the-all-collection) — it always exists
-and holds every doc (date descending). Point an archive at it, or render an
-`all()`-based page — e.g. a `templates/`-rendered doc whose body lists
-`{% for doc in all() %}{{ doc.id_path | permalink }}{% endfor %}`:
-
-```yaml
----
-kind: collection
-collection: all
-permalink: /sitemap.xml
----
-<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  {% for doc in pagination.items %}
-  <url><loc>{{ doc.id_path | permalink }}</loc></url>
-  {% endfor %}
-</urlset>
-```
+italic generates a sitemap and RSS feeds automatically — you don't have to write
+any archive for them. By default it emits `/sitemap.xml` over every doc and
+`/feed/all.xml`, configurable with the [`sitemap`](../reference/config.md#sitemap)
+and [`feed`](../reference/config.md#feed) config keys (each can name other
+collections or be disabled). To customize the markup, drop a disk archive at the
+same path — `archives/sitemap.xml` or `archives/feed/<name>.xml` shadows the
+built-in, and is an ordinary collection archive like the ones above.
 
 ## How archives fit the pipeline
 

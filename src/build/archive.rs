@@ -14,8 +14,10 @@
 //! are appended to the live index but are *not* re-classified — generated pages
 //! never appear in `collection()`/`taxonomy()`.
 
+mod builtin;
+
 use crate::build::markup;
-use crate::config::{self, Config};
+use crate::config::{self, Config, Feed, Sitemap};
 use crate::doc::{Doc, DocMeta};
 use crate::doc_index::DocIndex;
 use crate::permalink;
@@ -210,6 +212,25 @@ pub fn run(
         let a = Archive::parse(id_path, &source)
             .with_context(|| format!("parsing archive {}", path.display()))?;
         archives.push(a);
+    }
+
+    // Inject the built-in sitemap/feed archives (config-driven) as a lowest
+    // overlay layer: each is added only when no disk archive already owns its
+    // `id_path`, so a theme/site `archives/sitemap.xml` or `archives/feed/<name>.xml`
+    // transparently overrides it. A disabled `sitemap`/empty `feed` injects nothing.
+    if let Sitemap::Collection(collection) = &config.sitemap {
+        let id_path = PathBuf::from("sitemap.xml");
+        if !archives.iter().any(|a| a.id_path == id_path) {
+            archives.push(builtin::sitemap_archive(collection));
+        }
+    }
+    if let Feed::Collections(collections) = &config.feed {
+        for collection in collections {
+            let id_path = PathBuf::from(format!("feed/{collection}.xml"));
+            if !archives.iter().any(|a| a.id_path == id_path) {
+                archives.push(builtin::feed_archive(collection));
+            }
+        }
     }
 
     if archives.is_empty() {
@@ -573,6 +594,99 @@ mod tests {
         assert_eq!(outputs, vec!["posts/tags/shared/index.html".to_string()]);
         // That page lists only the posts/ doc, not the notes/ one.
         assert_eq!(pages[0].content.trim(), "posts/a.md;");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A minimal source doc at `id_path`, output to `<stem>.html`.
+    fn source_doc(id_path: &str) -> Doc {
+        Doc {
+            id_path: PathBuf::from(id_path),
+            output_path: PathBuf::from(id_path).with_extension("html"),
+            ..Default::default()
+        }
+    }
+
+    /// A `DocIndex` of two docs with a classified `all` collection, for the
+    /// built-in sitemap/feed tests.
+    fn index_with_all() -> DocIndex {
+        let mut idx = DocIndex::new();
+        idx.insert(source_doc("posts/a.md"));
+        idx.insert(source_doc("posts/b.md"));
+        idx.define_collection(config::ALL, &Query::default());
+        idx
+    }
+
+    fn empty_site_data() -> SiteData {
+        SiteData {
+            site: Mapping::new(),
+            data: Mapping::new(),
+        }
+    }
+
+    fn output_paths(pages: &[Doc]) -> Vec<String> {
+        pages
+            .iter()
+            .map(|p| p.output_path.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn builtin_sitemap_and_feed_emitted_when_enabled() {
+        let base = tempdir("builtin-on");
+        let config = Config {
+            archives_dir: base.join("site").join("archives"), // does not exist
+            templates_dir: base.join("none"),
+            sitemap: Sitemap::Collection(config::ALL.to_string()),
+            feed: Feed::Collections(vec![config::ALL.to_string()]),
+            ..Config::default()
+        };
+        let pages = run(&config, &empty_site_data(), &Arc::new(index_with_all())).unwrap();
+        let outputs = output_paths(&pages);
+        assert!(outputs.contains(&"sitemap.xml".to_string()), "{outputs:?}");
+        assert!(outputs.contains(&"feed/all.xml".to_string()), "{outputs:?}");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn disk_sitemap_overrides_builtin() {
+        let base = tempdir("builtin-override");
+        // A site archive named sitemap.xml (its own permalink) shadows the
+        // built-in: same `id_path`, so no built-in sitemap is injected.
+        write_archive(
+            &base,
+            "site",
+            "sitemap.xml",
+            "---\nkind: collection\ncollection: all\npermalink: /custom-sitemap.xml\n---\nBODY",
+        );
+        let config = Config {
+            archives_dir: base.join("site").join("archives"),
+            templates_dir: base.join("none"),
+            sitemap: Sitemap::Collection(config::ALL.to_string()),
+            feed: Feed::Collections(Vec::new()), // feeds disabled for this test
+            ..Config::default()
+        };
+        let pages = run(&config, &empty_site_data(), &Arc::new(index_with_all())).unwrap();
+        let outputs = output_paths(&pages);
+        assert!(
+            outputs.contains(&"custom-sitemap.xml".to_string()),
+            "{outputs:?}"
+        );
+        assert!(!outputs.contains(&"sitemap.xml".to_string()), "{outputs:?}");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn disabled_sitemap_and_empty_feed_emit_nothing() {
+        let base = tempdir("builtin-off");
+        let config = Config {
+            archives_dir: base.join("site").join("archives"), // does not exist
+            templates_dir: base.join("none"),
+            sitemap: Sitemap::Disabled,
+            feed: Feed::Collections(Vec::new()),
+            ..Config::default()
+        };
+        let pages = run(&config, &empty_site_data(), &Arc::new(index_with_all())).unwrap();
+        assert!(pages.is_empty(), "{:?}", output_paths(&pages));
         let _ = fs::remove_dir_all(&base);
     }
 

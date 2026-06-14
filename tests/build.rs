@@ -246,6 +246,11 @@ fn alias_collision() {
 }
 
 #[test]
+fn auto_archives() {
+    run_build("23_auto_archives");
+}
+
+#[test]
 fn scaffold() {
     // The 12_scaffold fixture has no input files — just an `expected/` dir.
     // The test exercises the real scaffold code path: scaffold into a temp dir

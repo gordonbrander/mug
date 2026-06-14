@@ -4,3 +4,7 @@ related:
   weights:
     tags: 1.0
     links: 1.0
+
+# Keep this fixture focused: auto-generated sitemap/feed are tested separately.
+sitemap:
+feed: []

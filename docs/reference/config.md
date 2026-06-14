@@ -27,6 +27,10 @@ taxonomies: []    # declared taxonomy field names
 defaults: {}      # per-collection default frontmatter
 # related:        # weights for the related filter; defaults derived (see below)
 #   weights: {}
+
+sitemap: all      # collection the auto sitemap covers; null to disable
+feed:             # one /feed/<name>.xml per collection; `[]` to disable
+  - all
 ```
 
 ## Directories
@@ -177,6 +181,41 @@ inherited; if your site sets any weights, they win wholesale.
 
 See the [Related pages guide](../guides/related.md).
 
+## `sitemap`
+
+The collection the auto-generated `sitemap.xml` covers. Defaults to the
+always-present [`all` collection](#the-all-collection), so a zero-config site
+still gets a complete sitemap at `/sitemap.xml`. Name another collection to scope
+it, or set it to null (an empty `sitemap:`) to disable.
+
+```yaml
+sitemap: all     # default — every doc
+# sitemap: posts # only the `posts` collection
+# sitemap:       # null — no sitemap
+```
+
+To customize the markup, add your own `archives/sitemap.xml` — a disk archive of
+that name shadows the built-in (the built-in is a lowest overlay layer). The
+named collection must be declared under `collections:`, or the build fails.
+
+## `feed`
+
+A list of collections, each getting an RSS feed at `/feed/<name>.xml`. Defaults
+to `[all]` (a single `/feed/all.xml` over every doc). Use an empty list to
+disable feeds entirely.
+
+```yaml
+feed:
+  - all          # /feed/all.xml
+  - posts        # /feed/posts.xml
+# feed: []       # no feeds
+```
+
+Override any feed's markup with a disk archive at the matching path (e.g.
+`archives/feed/posts.xml`). Every listed collection must be declared under
+`collections:`. Feeds cap at the 20 most recent items per the collection's own
+order.
+
 ## Theme config merging
 
 When `theme:` is set, the theme's own `config.yaml` is loaded and layered
@@ -189,6 +228,8 @@ beneath yours:
 - `site:` is deep-merged, your values winning per key.
 - `hashtags` is on if either side enables it.
 - `related.weights`: yours win wholesale if set, otherwise the theme's.
+- `sitemap` and `feed`: yours win if set (including disabling), otherwise the
+  theme's; if neither sets them, they default to the `all` collection.
 - The theme's `*_dir` keys are ignored — a theme always uses its conventional
   `templates/`, `archives/`, `static/` subdirs.
 - `content_dir`, `output_dir`, and `data_dir` are always yours; a theme never

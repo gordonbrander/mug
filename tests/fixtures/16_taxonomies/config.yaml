@@ -1,3 +1,7 @@
 taxonomies:
   - tags
   - categories
+
+# Keep this fixture focused: auto-generated sitemap/feed are tested separately.
+sitemap:
+feed: []

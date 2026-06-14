@@ -1,0 +1,16 @@
+site:
+  title: Auto Archives
+  description: Testing built-in sitemap and feeds.
+  url: https://example.com
+
+collections:
+  posts:
+    path: "posts/*.md"
+    order_by: date
+    sort: desc
+
+# sitemap defaults to the `all` collection (every doc) at /sitemap.xml.
+# feed lists collections to generate one /feed/<name>.xml each.
+feed:
+  - all
+  - posts
